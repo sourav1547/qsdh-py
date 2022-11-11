@@ -28,11 +28,11 @@ class HbAVSSMessageType:
 class ACSS_HT:
     #@profile
     def __init__(
-            self, public_keys, private_key, g, h, n, t, deg, sc, my_id, send, recv, pc, field, G1
+            self, public_keys, private_key, gs, h, n, t, sc, my_id, send, recv, pc, field, G1
     ):  # (# noqa: E501)
         self.public_keys, self.private_key = public_keys, private_key
-        self.n, self.t, self.deg, self.my_id = n, t, deg, my_id
-        self.g, self.h = g, h 
+        self.n, self.t, self.my_id = n, t, my_id
+        self.g, self.h = gs[0], h 
         self.sr = Serial(G1)
         self.sc = sc 
         self.poly_commit = pc
@@ -62,18 +62,13 @@ class ACSS_HT:
     def __enter__(self):
         return self
 
-    #def __exit__(self, typ, value, traceback):
     def kill(self):
-        # self.benchmark_logger.info("ACSS kill called")
         self.subscribe_recv_task.cancel()
-        # self.benchmark_logger.info("ACSS recv task cancelled")
         for task in self.tasks:
             task.cancel()
-        # self.benchmark_logger.info("ACSS self.tasks cancelled")
         for key in self.tagvars:
             for task in self.tagvars[key]['tasks']:
                 task.cancel()
-        # self.benchmark_logger.info("ACSS self tagvars canceled")
 
     
     #@profile

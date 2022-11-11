@@ -1,8 +1,8 @@
 # Implements hybrid between Feldman and Pedersen polynomial commitment. 
 
 class PolyCommitHybrid:
-    def __init__(self, g, h, field, multiexp):
-        self.g, self.h = g, h
+    def __init__(self, gs, h, field, multiexp):
+        self.g, self.h = gs[0], h
         self.ZR = field
         self.multiexp = multiexp
 
