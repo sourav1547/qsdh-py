@@ -541,4 +541,4 @@ class ADKG:
         # qsdh_time = time.time()-start_time
         # logging.info("ADKG time 2: %f", qsdh_time)
         # self.benchmark_logger.info("ADKG time: %f", qsdh_time)
-        self.output_queue.put_nowait((values[1], mks, t_share, t_pk, params, powers))
+        self.output_queue.put_nowait((values[1], mks, t_share, t_pk, params, pt_shares, pt_commits, powers))

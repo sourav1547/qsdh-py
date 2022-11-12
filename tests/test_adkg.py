@@ -1,6 +1,7 @@
 from adkg.poly_commit_hybrid import PolyCommitHybrid
 from pytest import mark
 from adkg.polynomial import polynomials_over
+from adkg.utils.poly_misc import interpolate_g1_at_x
 from adkg.adkg import ADKG
 import asyncio
 import numpy as np
@@ -66,16 +67,19 @@ async def test_adkg(test_router):
     
     
     shares = []
+    pt_shares = [[] for _ in range(logq)]
+
     low_doubles = [[] for _ in range(logq)]
     high_doubles = [[] for _ in range(logq)]
 
     i = 1
-    for _, _, sk, _, doubles, _ in outputs:
+    for _, _, sk, _, doubles, npt_shares, _ , _ in outputs:
         shares.append([i, sk])
         l_shares, h_shares, _, _ = doubles
         for ii in range(logq):
             low_doubles[ii].append([i, l_shares[ii]])
             high_doubles[ii].append([i, h_shares[ii]])
+            pt_shares[ii].append([i, npt_shares[ii]])
         i = i + 1
 
     poly = polynomials_over(ZR)
@@ -88,13 +92,26 @@ async def test_adkg(test_router):
     mpk = gs[0]**msk
 
     for i in range(n):
-        pk, powers  = outputs[i][3], outputs[i][5]
+        pk, powers  = outputs[i][3], outputs[i][7]
         assert(mpk == pk)
         csk = msk
         for ii in range(logq):
             assert powers[ii] == gs[0]**csk
             csk = csk*csk  
 
+    csk = msk
+    for ii in range(logq):
+        assert csk == poly.interpolate_at(pt_shares[ii], 0)
+        csk = csk*csk 
+    
+
+    for i in range(n):
+        pt_commits  = outputs[i][6]
+        csk = msk
+        for ii in range(logq):
+            pt_power = interpolate_g1_at_x(pt_commits[ii], 0, G1, ZR)
+            assert pt_power == gs[0]**csk
+            csk = csk*csk 
 
     mks_set = outputs[0][1]
     for i in range(1, n):
