@@ -3,11 +3,11 @@ from adkg.utils.poly_misc import interpolate_g1_at_x
 from adkg.utils.misc import wrap_send, subscribe_recv
 import asyncio
 import hashlib, time
-from math import ceil, pow
 import logging
 from adkg.utils.bitmap import Bitmap
 from adkg.acss_ht import ACSS_HT
 from adkg.squaring import SQUARE
+from adkg.all_powers import ALL_POWERS
 
 from adkg.broadcast.tylerba import tylerba
 from adkg.broadcast.optqrbc import optqrbc
@@ -23,6 +23,7 @@ class ADKGMsgType:
     PREKEY = "P"
     KEY = "K"
     SQ = "S"
+    AP = "X"
     
 class CP:
     def __init__(self, g, h, ZR):
@@ -83,7 +84,7 @@ class ADKG:
     def __init__(self, public_keys, private_key, gs, h, n, t, logq, my_id, send, recv, pc, curve_params, matrices):
         self.public_keys, self.private_key, self.gs, self.h = (public_keys, private_key, gs, h)
         self.n, self.t, self.logq, self.my_id = (n, t, logq, my_id)
-        self.q = pow(2, self.logq)
+        self.q = 2**self.logq
         # Total number of secrets: 1 for ACS, 1 for tau, logq*(1+2) for random double sharing
         self.sc = 3*self.logq + 2 
         self.send, self.recv, self.pc = (send, recv, pc)
@@ -513,6 +514,15 @@ class ADKG:
         # powers-of-two shares, powers-of-two commits, and already computed powers
         pt_shares, pt_commits, powers  = await self.sq.output_queue.get()
         return (pt_shares, pt_commits, powers)
+
+    
+    async def all_powers(self, t_shares, t_commits, t_powers):
+        aptag = ADKGMsgType.AP
+        apsend, aprecv = self.get_send(aptag), self.subscribe_recv(aptag)
+        self.ap = ALL_POWERS(self.gs[0], self.h, self.n, self.t, self.logq, self.my_id, apsend, aprecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
+        self.ap_task = asyncio.create_task(self.ap.powers(t_shares, t_commits, t_powers))
+        powers  = await self.ap.output_queue.get()
+        return powers
         
     async def run_adkg(self, start_time):
         logging.info(f"Run ADKG called")
@@ -535,7 +545,9 @@ class ADKG:
         mks, t_share, t_pk, pks, shares, d_shares, low_f_commits, high_f_commits = output
         params = (shares, d_shares, low_f_commits, high_f_commits)
         sq_task = asyncio.create_task(self.squaring(t_share, t_pk, pks, params))
-        pt_shares, pt_commits, powers = await sq_task
+        pt_shares, pt_commits, t_powers = await sq_task
+        ap_task = asyncio.create_task(self.all_powers(pt_shares, pt_commits, t_powers))
+        powers = await ap_task
         # create_qsdh_task = asyncio.create_task(self.qsdh(output))
         # params = await create_qsdh_task
         # qsdh_time = time.time()-start_time

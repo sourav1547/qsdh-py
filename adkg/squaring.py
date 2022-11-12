@@ -15,9 +15,6 @@ logger.setLevel(logging.ERROR)
 # logger.setLevel(logging.DEBUG)
 
 
-class SquareMessageType:
-    DATA = 1
-    
 class SQUARE:
     #@profile
     def __init__(

@@ -37,9 +37,9 @@ def gen_vector(t, n):
 
 @mark.asyncio
 async def test_adkg(test_router):
-    t = 1
+    t = 2
     logq = 5
-    q = math.pow(2,logq)
+    q = 2**logq
     n = 3 * t + 1
     gs, h, pks, sks = get_avss_params(n, logq, G1)
     sends, recvs, _ = test_router(n, maxdelay=0.01)
@@ -91,13 +91,19 @@ async def test_adkg(test_router):
     msk = poly.interpolate_at(shares,0)
     mpk = gs[0]**msk
 
+    # for i in range(n):
+    #     pk, powers  = outputs[i][3], outputs[i][7]
+    #     assert(mpk == pk)
+    #     csk = msk
+    #     for ii in range(logq):
+    #         assert powers[ii] == gs[0]**csk
+    #         csk = csk*csk 
+
     for i in range(n):
-        pk, powers  = outputs[i][3], outputs[i][7]
+        pk, powers = outputs[i][3], outputs[i][7] 
         assert(mpk == pk)
-        csk = msk
-        for ii in range(logq):
-            assert powers[ii] == gs[0]**csk
-            csk = csk*csk  
+        for ii in range(q):
+            assert powers[ii] == gs[0]**(msk**ii)
 
     csk = msk
     for ii in range(logq):
