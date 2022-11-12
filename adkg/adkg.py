@@ -7,6 +7,7 @@ from math import ceil, pow
 import logging
 from adkg.utils.bitmap import Bitmap
 from adkg.acss_ht import ACSS_HT
+from adkg.squaring import SQUARE
 
 from adkg.broadcast.tylerba import tylerba
 from adkg.broadcast.optqrbc import optqrbc
@@ -21,6 +22,7 @@ class ADKGMsgType:
     ABA = "B"
     PREKEY = "P"
     KEY = "K"
+    SQ = "S"
     
 class CP:
     def __init__(self, g, h, ZR):
@@ -501,8 +503,17 @@ class ADKG:
         # TODO:(@sourav) FIXME! To do FFT in the exponent here
         # TODO:(@sourav) FIXME! Add the fallback path
         assert pk*rk == com0
-        return (self.mks, t_share, pk, shares, d_shares, low_f_commits, high_f_commits)
+        return (self.mks, t_share, pk, pk_shares, shares, d_shares, low_f_commits, high_f_commits)
 
+    async def squaring(self, t_share, t_pk, t_commits, params):
+        sqtag = ADKGMsgType.SQ
+        sqsend, sqrecv = self.get_send(sqtag), self.subscribe_recv(sqtag)
+        self.sq = SQUARE(self.gs[0], self.h, self.n, self.t, self.logq, self.my_id, sqsend, sqrecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
+        self.sq_task = asyncio.create_task(self.sq.square(t_share, t_pk, t_commits, params))
+        # powers-of-two shares, powers-of-two commits, and already computed powers
+        pt_shares, pt_commits, powers  = await self.sq.output_queue.get()
+        return (pt_shares, pt_commits, powers)
+        
     async def run_adkg(self, start_time):
         logging.info(f"Run ADKG called")
         acss_outputs = {}
@@ -521,12 +532,13 @@ class ADKG:
         await acs
         output = await key_task
         await asyncio.gather(*work_tasks)
+        mks, t_share, t_pk, pks, shares, d_shares, low_f_commits, high_f_commits = output
+        params = (shares, d_shares, low_f_commits, high_f_commits)
+        sq_task = asyncio.create_task(self.squaring(t_share, t_pk, pks, params))
+        pt_shares, pt_commits, powers = await sq_task
         # create_qsdh_task = asyncio.create_task(self.qsdh(output))
         # params = await create_qsdh_task
         # qsdh_time = time.time()-start_time
         # logging.info("ADKG time 2: %f", qsdh_time)
         # self.benchmark_logger.info("ADKG time: %f", qsdh_time)
-        mks, t_share, pk, shares, d_shares, low_f_commits, high_f_commits = output
-        params = (shares, d_shares, low_f_commits, high_f_commits)
-        # self.output_queue.put_nowait((values[1], mks, t_share, pk))
-        self.output_queue.put_nowait((values[1], mks, t_share, pk, params))
+        self.output_queue.put_nowait((values[1], mks, t_share, t_pk, params, powers))

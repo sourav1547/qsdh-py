@@ -36,7 +36,7 @@ def gen_vector(t, n):
 
 @mark.asyncio
 async def test_adkg(test_router):
-    t = 2
+    t = 1
     logq = 5
     q = math.pow(2,logq)
     n = 3 * t + 1
@@ -70,7 +70,7 @@ async def test_adkg(test_router):
     high_doubles = [[] for _ in range(logq)]
 
     i = 1
-    for _, _, sk, _, doubles in outputs:
+    for _, _, sk, _, doubles, _ in outputs:
         shares.append([i, sk])
         l_shares, h_shares, _, _ = doubles
         for ii in range(logq):
@@ -84,15 +84,21 @@ async def test_adkg(test_router):
         h_const = poly.interpolate_at(high_doubles[ii],0)
         assert l_const == h_const
     
-    # msk = poly.interpolate_at(shares,0)
-    # mpk = gs[0]**msk
+    msk = poly.interpolate_at(shares,0)
+    mpk = gs[0]**msk
 
-    # for i in range(n):
-    #     assert(mpk == outputs[i][3])
+    for i in range(n):
+        pk, powers  = outputs[i][3], outputs[i][5]
+        assert(mpk == pk)
+        csk = msk
+        for ii in range(logq):
+            assert powers[ii] == gs[0]**csk
+            csk = csk*csk  
 
-    # mks_set = outputs[0][1]
-    # for i in range(1, n):
-    #     assert mks_set == outputs[i][1]
+
+    mks_set = outputs[0][1]
+    for i in range(1, n):
+        assert mks_set == outputs[i][1]
 
     # mks_sum = ZR(0)
     # for node in mks_set:
