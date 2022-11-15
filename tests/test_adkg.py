@@ -37,7 +37,7 @@ def gen_vector(t, n):
 
 @mark.asyncio
 async def test_adkg(test_router):
-    t = 2
+    t = 1
     logq = 5
     q = 2**logq
     n = 3 * t + 1
