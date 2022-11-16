@@ -1,7 +1,7 @@
 import asyncio
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
-from adkg.utils.poly_misc import interpolate_g1_at_x
+from adkg.utils.poly_misc import interpolate_g1_at_x, interpolate_g1_at_all, evaluate_g1_at_all
 from adkg.extra_proofs import PoK
 
 
@@ -64,6 +64,7 @@ class RANDOUSHA:
         r_shares = [[self.ZR(0)]*self.logq for _ in range(self.n)]
         dz_shares = [[self.ZR(0)]*self.logq for _ in range(self.n)]
         dr_shares = [[self.ZR(0)]*self.logq for _ in range(self.n)]
+        self.com_z_0 = [None]*self.logq
         
         for count in range(self.logq):
             # Generating degree t shares 
@@ -85,6 +86,8 @@ class RANDOUSHA:
                     
                     low_const = low_const + secrets[node]
                     low_const_r = low_const_r + randomness[node]
+            
+            self.com_z_0[count] = self.multiexp(commits,[self.ZR(1)]*self.n)
 
             # For (n,2t+1) shares of random values
             d_secrets = [[self.ZR(0)]*self.n for _ in range(2)]
@@ -179,9 +182,9 @@ class RANDOUSHA:
         # TODO: We will need to generate proof of knowledge for these values as well.
         # Can we possibly prove it in batch?
         low_commits = [self.gs[0]**shares[ii] for ii in range(self.logq)]
-        low_r_commits = [self.gs[0]**randoms[ii] for ii in range(self.logq)]
+        low_r_commits = [self.h**randoms[ii] for ii in range(self.logq)]
         high_commits = [self.gs[0]**d_shares[ii] for ii in range(self.logq)]
-        high_r_commits = [self.gs[0]**d_randoms[ii] for ii in range(self.logq)]
+        high_r_commits = [self.h**d_randoms[ii] for ii in range(self.logq)]
 
         low_pfs = [None]*self.logq
         low_r_pfs = [None]*self.logq
@@ -190,9 +193,9 @@ class RANDOUSHA:
         
         for ii in range(self.logq):
             low_pfs[ii] = gpok.prove(shares[ii], self.gs[0]**shares[ii])
-            low_r_pfs[ii] = hpok.prove(randoms[ii],self.gs[0]**randoms[ii])
+            low_r_pfs[ii] = hpok.prove(randoms[ii],self.h**randoms[ii])
             high_pfs[ii] = gpok.prove(d_shares[ii], self.gs[0]**d_shares[ii])
-            high_r_pfs[ii] = hpok.prove(d_randoms[ii], self.gs[0]**d_randoms[ii])
+            high_r_pfs[ii] = hpok.prove(d_randoms[ii], self.h**d_randoms[ii])
 
         all_commits = (low_commits, low_r_commits, high_commits, high_r_commits)
         all_proofs = (low_pfs, low_r_pfs, high_pfs, high_r_pfs)
@@ -207,12 +210,15 @@ class RANDOUSHA:
         rk_shares = [[self.my_id+1, mtr]]
 
         low_f_commits = [[] for _ in range(self.logq)]
+        low_f_randoms = [[] for _ in range(self.logq)]
         high_f_commits = [[] for _ in range(self.logq)]
+        high_f_randoms = [[] for _ in range(self.logq)]
 
         for ii in range(self.logq):
             low_f_commits[ii].append([self.my_id+1, low_commits[ii]])
+            low_f_randoms[ii].append([self.my_id+1, low_r_commits[ii]])
             high_f_commits[ii].append([self.my_id+1, high_commits[ii]])
-
+            high_f_randoms[ii].append([self.my_id+1, high_r_commits[ii]])
 
         while True:
             (sender, msg) = await recv()
@@ -229,23 +235,46 @@ class RANDOUSHA:
                     for ii in range(self.logq):
                         valid_z_pok = gpok.verify(low_com_s[ii], low_pfs_s[ii])
                         valid_z_pok = valid_z_pok and hpok.verify(low_r_com_s[ii], low_r_pfs_s[ii])
-                        low_f_commits[ii].append([sender+1, low_com_s[ii]])
+                        if valid_z_pok:
+                            low_f_commits[ii].append([sender+1, low_com_s[ii]])
+                            low_f_randoms[ii].append([sender+1, low_r_com_s[ii]])
+
 
                         valid_d_pok = gpok.verify(high_com_s[ii], high_pfs_s[ii])
                         valid_d_pok = valid_d_pok and hpok.verify(high_r_com_s[ii], high_r_pfs_s[ii])
-                        
-                        high_f_commits[ii].append([sender+1, high_com_s[ii]])
+                        if valid_d_pok:
+                            high_f_commits[ii].append([sender+1, high_com_s[ii]])
+                            high_f_randoms[ii].append([sender+1, high_r_com_s[ii]])
+
 
             if len(pk_shares) > 2*self.t:
                 break
         pk =  interpolate_g1_at_x(pk_shares, 0, self.G1, self.ZR)
         rk =  interpolate_g1_at_x(rk_shares, 0, self.G1, self.ZR)
+        
         com0 = self.multiexp(self.t_commits, [self.ZR(1)]*self.n)
-        # TODO:(@sourav) FIXME! To do FFT in the exponent here
-        # TODO:(@sourav) FIXME! Add the fallback path
-
         assert pk*rk == com0
-        return (pk, pk_shares, low_f_commits, high_f_commits)
+
+        for i in range(self.logq):
+            high_pk = interpolate_g1_at_x(high_f_commits[i], 0, self.G1, self.ZR)
+            high_rk = interpolate_g1_at_x(high_f_randoms[i], 0, self.G1, self.ZR)
+            assert high_pk*high_rk == self.com_z_0[i]
+
+            low_pk = interpolate_g1_at_x(low_f_commits[i], 0, self.G1, self.ZR)
+            low_rk = interpolate_g1_at_x(low_f_randoms[i], 0, self.G1, self.ZR)
+            assert low_pk*low_rk == self.com_z_0[i]
+
+        # FIXME! Add the fallback path for the case when this assertion fails
+        pk_out_shares = pk_shares
+        low_out_commits = low_f_commits
+        high_out_commits = high_f_commits
+
+        # TODO:(@sourav) FIXME! To do FFT in the exponent here
+        # pk_out_shares = interpolate_g1_at_all(pk_shares, self.n, self.G1, self.ZR)
+        # low_out_commits = interpolate_g1_at_all(low_f_commits, self.n, self.G1, self.ZR)
+        # high_out_commits = interpolate_g1_at_all(high_f_commits, self.n, self.G1, self.ZR)
+        
+        return (pk, pk_out_shares, low_out_commits, high_out_commits)
 
     async def randousha(self, mks, acss_outputs):
         # Generating messages for shares of tau
