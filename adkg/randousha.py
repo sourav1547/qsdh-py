@@ -19,8 +19,6 @@ class RANDOUSHA:
         self.gs, self.h = gs, h
         self.n, self.t, self.logq, self.my_id = (n, t, logq, my_id)
         self.q = 2**self.logq
-        # Total number of secrets: 1 for ACS, 1 for tau, logq*(1+2) for random double sharing
-        self.sc = 3*self.logq + 2 
         self.send, self.recv = send, recv
         self.ZR, self.G1, self.multiexp, self.dotprod = curve_params
         self.poly = polynomials_over(self.ZR)
@@ -40,23 +38,27 @@ class RANDOUSHA:
             logging.getLogger("benchmark_logger"), {"node_id": self.my_id}
         )
 
-    async def randousha(self, mks, acss_outputs):
-        # Generating secret shares of tau
-        t_secrets = [self.ZR(0)]*self.n
-        t_randomness = [self.ZR(0)]*self.n
-        t_commits = [self.G1.identity()]*self.n
+    # Randomness extraction for shares of tau
+    def gen_tau_shares(self, acss_outputs):
+        secrets = [self.ZR(0)]*self.n
+        randomness = [self.ZR(0)]*self.n
+        commits = [self.G1.identity()]*self.n
 
         for node in range(self.n):
-            t_secrets[node] = acss_outputs[node]['shares']['msg'][2]
-            t_randomness[node] = acss_outputs[node]['shares']['rand'][1]
-            t_commits[node] = acss_outputs[node]['commits'][2][0]
+            secrets[node] = acss_outputs[node]['shares']['msg'][2]
+            randomness[node] = acss_outputs[node]['shares']['rand'][1]
+            commits[node] = acss_outputs[node]['commits'][2][0]
         
-        tz_shares = [self.ZR(0)]*self.n
-        tr_shares = [self.ZR(0)]*self.n
+        z_shares = [self.ZR(0)]*self.n
+        r_shares = [self.ZR(0)]*self.n
         for i in range(self.n):
-            tz_shares[i] = self.dotprod(self.matrix[0][i], t_secrets)
-            tr_shares[i] = self.dotprod(self.matrix[0][i], t_randomness)
-
+            z_shares[i] = self.dotprod(self.matrix[0][i], secrets)
+            r_shares[i] = self.dotprod(self.matrix[0][i], randomness)
+        
+        return (z_shares, r_shares, commits)
+    
+    # Randomness extraction for double shares
+    def gen_double_shares(self, mks, acss_outputs):
 
         z_shares = [[self.ZR(0)]*self.logq for _ in range(self.n)]
         r_shares = [[self.ZR(0)]*self.logq for _ in range(self.n)]
@@ -80,7 +82,7 @@ class RANDOUSHA:
                     secrets[node] = acss_outputs[node]['shares']['msg'][idx+1]
                     randomness[node] = acss_outputs[node]['shares']['rand'][idx]
                     commits[node] = acss_outputs[node]['commits'][idx+1][0]
-                    # FIXME: To update the corresponding randomness appropriately
+                    
                     low_const = low_const + secrets[node]
                     low_const_r = low_const_r + randomness[node]
 
@@ -88,9 +90,6 @@ class RANDOUSHA:
             d_secrets = [[self.ZR(0)]*self.n for _ in range(2)]
             d_randomness = [[self.ZR(0)]*self.n for _ in range(2)]
             d_commits = [[self.G1.identity()]*self.n for _ in range(2)]
-
-            # TODO: FIXME: Currently, the secret in double sharing do no match. 
-            # Without this fix, the implementation is incorrect.
 
             # Generating degree t shares
             for lidx in range(2):
@@ -116,19 +115,21 @@ class RANDOUSHA:
                 dz_shares[i][count] = dz_shares[i][count] + low_const - high_const
                 dr_shares[i][count] = dr_shares[i][count] + low_const_r - high_const_r
 
-            # TODO: Probably we will need to do something similar for the commitments as well.
+        return (z_shares, r_shares, dz_shares, dr_shares)
 
+    async def pre_key(self, z_shares, r_shares, dz_shares, dr_shares):
         # Sending PREKEY messages
         keytag = MsgType.PREKEY
         send, recv = self.get_send(keytag), self.subscribe_recv(keytag)
 
         for i in range(self.n):
-            send(i, (tz_shares[i], tr_shares[i], z_shares[i], r_shares[i], dz_shares[i], dr_shares[i]))
+            send(i, (self.tz_shares[i], self.tr_shares[i], z_shares[i], r_shares[i], dz_shares[i], dr_shares[i]))
         
+        # To store shares of tau
         tz_share_shares = []
         tr_share_shares = []
 
-        # For double shares
+        # To store shares of double shares
         shares_shares = [[] for _ in range(self.logq)]
         randoms_shares = [[] for _ in range(self.logq)]
         d_shares_shares = [[] for _ in range(self.logq)]
@@ -155,6 +156,7 @@ class RANDOUSHA:
                 t_share =  self.poly.interpolate_at(tz_share_shares, 0)
                 t_random =  self.poly.interpolate_at(tr_share_shares, 0)
 
+                # TODO: Can we do some kind of batch implementation to speed up things?
                 for ii in range(self.logq):
                     shares[ii] = self.poly.interpolate_at(shares_shares[ii], 0)
                     randoms[ii] = self.poly.interpolate_at(randoms_shares[ii], 0)
@@ -163,22 +165,27 @@ class RANDOUSHA:
                 
                 break
 
-                # TODO(@sourav): Implement the verification check and also the fallback path
+                # TODO(@sourav): 
+                # 1. Implement the verification to check correctness of the shares
+                # 2. Implement the fallback path
                 # commit = self.G1.identity()
                 # for sec in range(self.sc-1):
                 #     commit = commit*self.multiexp(commits[sec], self.matrix[sec][self.my_id])
                 # if self.multiexp([self.g, self.h],[secret, random]) == commit:
                 #     break
-                
+        
+        return t_share, t_random, shares, randoms, d_shares, d_randoms
 
-        mt = self.gs[0]**t_share
-        mtr = self.h**t_random
+    async def derive_key(self, shares, randoms, d_shares, d_randoms):
+        mt = self.gs[0]**self.t_share
+        mtr = self.h**self.t_random
         gpok = PoK(self.gs[0], self.ZR, self.multiexp)
         hpok = PoK(self.h, self.ZR, self.multiexp)
-        gchal, gres = gpok.pok_prove(t_share, mt)
-        hchal, hres = hpok.pok_prove(t_random, mtr)
+        gchal, gres = gpok.pok_prove(self.t_share, mt)
+        hchal, hres = hpok.pok_prove(self.t_random, mtr)
 
         # TODO: We will need to generate proof of knowledge for these values as well.
+        # Can we possibly prove it in batch?
         low_commits = [self.gs[0]**shares[ii] for ii in range(self.logq)]
         low_r_commits = [self.gs[0]**randoms[ii] for ii in range(self.logq)]
         high_commits = [self.gs[0]**d_shares[ii] for ii in range(self.logq)]
@@ -218,9 +225,27 @@ class RANDOUSHA:
                 break
         pk =  interpolate_g1_at_x(pk_shares, 0, self.G1, self.ZR)
         rk =  interpolate_g1_at_x(rk_shares, 0, self.G1, self.ZR)
-        com0 = self.multiexp(t_commits, [self.ZR(1)]*self.n)
+        com0 = self.multiexp(self.t_commits, [self.ZR(1)]*self.n)
         # TODO:(@sourav) FIXME! To do FFT in the exponent here
         # TODO:(@sourav) FIXME! Add the fallback path
         assert pk*rk == com0
-        self.output_queue.put_nowait((mks, t_share, pk, pk_shares, shares, d_shares, low_f_commits, high_f_commits))
+        return (pk, pk_shares, low_f_commits, high_f_commits)
+
+    async def randousha(self, mks, acss_outputs):
+        # Generating messages for shares of tau
+        self.tz_shares, self.tr_shares, self.t_commits = self.gen_tau_shares(acss_outputs)
+        
+        # Generating messages for double shaers
+        z_shares, r_shares, dz_shares, dr_shares  = self.gen_double_shares(mks, acss_outputs)
+        
+        # Running the Randomness Extraction Phase
+        # TODO: Probably we will need to do something similar for the commitments as well.
+        pre_key_task = asyncio.create_task(self.pre_key(z_shares, r_shares, dz_shares, dr_shares))
+        self.t_share, self.t_random, shares, randoms, d_shares, d_randoms = await pre_key_task
+
+        # Deriving public commitments
+        key_task = asyncio.create_task(self.derive_key(shares, randoms, d_shares, d_randoms))
+        pk, pk_shares, low_f_commits, high_f_commits = await key_task
+
+        self.output_queue.put_nowait((mks, self.t_share, pk, pk_shares, shares, d_shares, low_f_commits, high_f_commits))
         return

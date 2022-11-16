@@ -7,7 +7,7 @@ from adkg.utils.bitmap import Bitmap
 from adkg.acss_ht import ACSS_HT
 from adkg.squaring import SQUARE
 from adkg.all_powers import ALL_POWERS
-from adkg.key_derive import RANDOUSHA
+from adkg.randousha import RANDOUSHA
 
 from adkg.broadcast.tylerba import tylerba
 from adkg.broadcast.optqrbc import optqrbc
@@ -20,8 +20,6 @@ class ADKGMsgType:
     ACSS = "A"
     RBC = "R"
     ABA = "B"
-    PREKEY = "P"
-    KEY = "K"
     SQ = "S"
     AP = "X"
     RDS = "D"
@@ -58,7 +56,13 @@ class ADKG:
             for task in self.acss_tasks:
                 task.cancel()
             self.acss.kill()
+            self.rds.kill()
+            self.sq.kill()
+            self.ap.kill()
             self.acss_task.cancel()
+            self.rds_task.cancel()
+            self.sq_task.cancel()
+            self.ap_task.cancel()
         except Exception:
             logging.info("ADKG task finished")
         
@@ -269,6 +273,7 @@ class ADKG:
                 await acss_signal.wait()
                 acss_signal.clear()
 
+        # Invoke the protocol for randomness extraction
         rdstag = ADKGMsgType.RDS
         rdssend, rdsrecv = self.get_send(rdstag), self.subscribe_recv(rdstag)
         self.rds = RANDOUSHA(self.gs, self.h, self.n, self.t, self.logq, self.my_id, rdssend, rdsrecv, (self.ZR, self.G1, self.multiexp, self.dotprod), self.matrix)
