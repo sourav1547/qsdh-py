@@ -1034,7 +1034,7 @@ def dleq_derive_chal(x, y, a1, a2):
         hs =  hashlib.sha256(commit).digest()
         return ZR.hash(hs)
 
-def dleq_verify(base1, base2, x, y, proof):
+def verify(base1, base2, x, y, proof):
     chal, res = proof
     a1 = (x**chal)*(base1**res)
     a2 = (y**chal)*(base2**res)
@@ -1042,7 +1042,7 @@ def dleq_verify(base1, base2, x, y, proof):
     return eLocal == chal
 
 #zkPoK of alpha s.t. base1**alpha=x, base2**alpha=y
-def dleq_prove(base1, base2, x, y, alpha):
+def prove(base1, base2, x, y, alpha):
     w = ZR.random()
     a1 = base1**w
     a2 = base2**w

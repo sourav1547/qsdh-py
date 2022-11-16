@@ -150,7 +150,6 @@ class RANDOUSHA:
                 d_shares_shares[ii].append([sender+1, d_shares_p[ii]])
                 d_randoms_shares[ii].append([sender+1, d_randoms_p[ii]])
 
-
             # Interpolating the share
             if len(tz_share_shares) >= self.t+1:    
                 t_share =  self.poly.interpolate_at(tz_share_shares, 0)
@@ -164,16 +163,9 @@ class RANDOUSHA:
                     d_randoms[ii] = self.poly.interpolate_at(d_randoms_shares[ii], 0)
                 
                 break
-
                 # TODO(@sourav): 
-                # 1. Implement the verification to check correctness of the shares
-                # 2. Implement the fallback path
-                # commit = self.G1.identity()
-                # for sec in range(self.sc-1):
-                #     commit = commit*self.multiexp(commits[sec], self.matrix[sec][self.my_id])
-                # if self.multiexp([self.g, self.h],[secret, random]) == commit:
-                #     break
-        
+                # 1. Implement the verification to check correctness of the reconstructed  value
+                # 2. Implement the OEC
         return t_share, t_random, shares, randoms, d_shares, d_randoms
 
     async def derive_key(self, shares, randoms, d_shares, d_randoms):
@@ -181,8 +173,8 @@ class RANDOUSHA:
         mtr = self.h**self.t_random
         gpok = PoK(self.gs[0], self.ZR, self.multiexp)
         hpok = PoK(self.h, self.ZR, self.multiexp)
-        gchal, gres = gpok.pok_prove(self.t_share, mt)
-        hchal, hres = hpok.pok_prove(self.t_random, mtr)
+        gpf = gpok.prove(self.t_share, mt)
+        hpf = hpok.prove(self.t_random, mtr)
 
         # TODO: We will need to generate proof of knowledge for these values as well.
         # Can we possibly prove it in batch?
@@ -191,11 +183,25 @@ class RANDOUSHA:
         high_commits = [self.gs[0]**d_shares[ii] for ii in range(self.logq)]
         high_r_commits = [self.gs[0]**d_randoms[ii] for ii in range(self.logq)]
 
+        low_pfs = [None]*self.logq
+        low_r_pfs = [None]*self.logq
+        high_pfs = [None]*self.logq
+        high_r_pfs = [None]*self.logq
+        
+        for ii in range(self.logq):
+            low_pfs[ii] = gpok.prove(shares[ii], self.gs[0]**shares[ii])
+            low_r_pfs[ii] = hpok.prove(randoms[ii],self.gs[0]**randoms[ii])
+            high_pfs[ii] = gpok.prove(d_shares[ii], self.gs[0]**d_shares[ii])
+            high_r_pfs[ii] = hpok.prove(d_randoms[ii], self.gs[0]**d_randoms[ii])
+
+        all_commits = (low_commits, low_r_commits, high_commits, high_r_commits)
+        all_proofs = (low_pfs, low_r_pfs, high_pfs, high_r_pfs)
+
         keytag = MsgType.KEY
         send, recv = self.get_send(keytag), self.subscribe_recv(keytag)
 
         for i in range(self.n):
-            send(i, (mt, mtr, gchal, gres, hchal, hres, low_commits, low_r_commits, high_commits, high_r_commits))
+            send(i, (mt, mtr, gpf, hpf, all_commits, all_proofs))
         
         pk_shares = [[self.my_id+1, mt]]
         rk_shares = [[self.my_id+1, mtr]]
@@ -211,15 +217,24 @@ class RANDOUSHA:
         while True:
             (sender, msg) = await recv()
             if sender != self.my_id:
-                x, y, gchal, gres, hchal, hres, low_commits_p, _, high_commits_p, _ = msg
-                valid_pok = gpok.pok_verify(x, gchal, gres) and hpok.pok_verify(y, hchal, hres)
+                x, y, gpf_s, hpf_s, all_s_commits, all_s_proofs = msg
+                low_com_s, low_r_com_s, high_com_s, high_r_com_s = all_s_commits 
+                low_pfs_s, low_r_pfs_s, high_pfs_s, high_r_pfs_s = all_s_proofs
+
+                valid_pok = gpok.verify(x, gpf_s) and hpok.verify(y, hpf_s)
                 if valid_pok:
                     pk_shares.append([sender+1, x])
                     rk_shares.append([sender+1, y])
 
                     for ii in range(self.logq):
-                        low_f_commits[ii].append([sender+1, low_commits_p[ii]])
-                        high_f_commits[ii].append([sender+1, high_commits_p[ii]])
+                        valid_z_pok = gpok.verify(low_com_s[ii], low_pfs_s[ii])
+                        valid_z_pok = valid_z_pok and hpok.verify(low_r_com_s[ii], low_r_pfs_s[ii])
+                        low_f_commits[ii].append([sender+1, low_com_s[ii]])
+
+                        valid_d_pok = gpok.verify(high_com_s[ii], high_pfs_s[ii])
+                        valid_d_pok = valid_d_pok and hpok.verify(high_r_com_s[ii], high_r_pfs_s[ii])
+                        
+                        high_f_commits[ii].append([sender+1, high_com_s[ii]])
 
             if len(pk_shares) > 2*self.t:
                 break
@@ -228,6 +243,7 @@ class RANDOUSHA:
         com0 = self.multiexp(self.t_commits, [self.ZR(1)]*self.n)
         # TODO:(@sourav) FIXME! To do FFT in the exponent here
         # TODO:(@sourav) FIXME! Add the fallback path
+
         assert pk*rk == com0
         return (pk, pk_shares, low_f_commits, high_f_commits)
 
