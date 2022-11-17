@@ -30,7 +30,14 @@ def get_coeffs(coords, G1, ZR, order=-1):
 
 # To optimize this using NTT
 def interpolate_g1_at_all(coords, n, G1, ZR, order=-1):
-    return [interpolate_g1_at_x(coords, x, G1, ZR, order) for x in range(1, n+1)]
+    outputs = [None]*(n+1)
+    for (idx, value) in coords:
+        outputs[idx] = value
+    
+    for idx in range(n+1): 
+        if outputs[idx] == None:
+            outputs[idx] = interpolate_g1_at_x(coords, idx, G1, ZR, order)
+    return outputs
 
 # To optimize this using NTT
 def evaluate_g1_at_all(coeffs, n, ZR, multiexp):

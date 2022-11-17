@@ -1,10 +1,9 @@
 import asyncio
-from collections import defaultdict
-import math
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
 from adkg.utils.poly_misc import interpolate_g1_at_x
+from adkg.extra_proofs import CP
 
 
 import logging
@@ -21,7 +20,7 @@ class SQUARE:
             self, g, h, n, t, logq, my_id, send, recv, curve_params
     ):  # (# noqa: E501)
         self.n, self.t, self.logq, self.my_id = n, t, logq, my_id
-        self.q = math.pow(2,self.logq)
+        self.q = 2**self.logq
         self.g, self.h = g, h
         self.ZR, self.G1, self.multiexp, self.dotprod = curve_params
         self.sr = Serial(self.G1)
@@ -38,13 +37,10 @@ class SQUARE:
             return wrap_send(tag, send)
 
         self.get_send = _send
-
-        self.sq_status = defaultdict(lambda: True)
         self.poly = polynomials_over(self.ZR)
         self.poly.clear_cache()
         self.output_queue = asyncio.Queue()
         self.tagvars = {}
-        self.tasks = []
         self.data = {}
 
     def __enter__(self):
@@ -52,57 +48,31 @@ class SQUARE:
 
     def kill(self):
         self.subscribe_recv_task.cancel()
-        for task in self.tasks:
-            task.cancel()
         for key in self.tagvars:
             for task in self.tagvars[key]['tasks']:
                 task.cancel()
 
-    # async def _process_prv_msg(self, resutls):
-    #     return
-    #     for idx, values in self.unvalidated_list.items():
-    #         if len(values) > self.t:
-    #             match_count = 0
-    #             match_ids = {}
-    #             for sender, _ in values:
-    #                 if self.square_tpks[idx][sender]:
-    #                     match_count = match_count + 1
-    #                     match_ids[idx] = True
-    #             if match_count <= self.t:
-    #                 continue
-            
-    #             for sender, sender_reveal in values:
-    #                 if sender not in match_ids:
-    #                     continue
-    #                 sender_ptpk = self.square_tpks[idx][sender]
-    #                 gr_t = self.doubles[2][sender]
-    #                 gr_2t = self.doubles[3][sender]
-    #                 valid = self.pair(g**sender_reveal, self.G2) == self.pair(sender_ptpk, sender_ptpk)*self.pair(gr_2t, self.G2)
-    #                 if valid:
-    #                     # Store in validated lists
-    #                 if self.square_tpks[idx][sender]:
-    #     return results
+    # FIXME: Possibly missing s_x and d_shares
+    def verify_sq(self, idx, sender, s_reveal, s_y, s_pf):
+        s_x = self.th_powers[idx-1][sender+1]
+        cp = CP(self.g, s_x, self.ZR, self.multiexp)
+        if cp.verify(s_x, s_y, s_pf):
+            return self.multiexp([self.high_f_commits[idx-1][sender+1], self.g], [self.ZR(1), s_reveal]) == s_y
+        return False
 
-    #@profile    
-    async def _process_msg(self, sender, sender_idx, sender_reveal):
-        results  = []
-        if not self.square_tpks[sender_idx][sender]:
-            self.unvalidated_list[sender_idx].append((sender, sender_reveal))
-            return None
-        sender_ptpk = self.square_tpks[sender_idx][sender]
-        gr_t = self.doubles[2][sender]
-        gr_2t = self.doubles[3][sender]
-        valid = self.pair(g**sender_reveal, self.G2) == self.pair(sender_ptpk, sender_ptpk)*self.pair(gr_2t, self.G2)
-
-        if valid:
-            self.square_tpks[sender_idx]['data'][sender] = self.G1**sender_reveal*gr_t
-            self.square_tpks[sender_idx]['count'] = self.square_tpks[sender_idx]['count'] + 1
-            if self.square_tpks[sender_idx]['count'] > self.t:
-                # TODO: Need to do a FFT in the exponent to fill the threshold public keys
-                results.append(sender_idx)
-                self._process_prv_msg(results)
-        return results
+    def process(self, idx, sq_shares):
+        # interpolating revealed message and next share
+        reveal = self.poly.interpolate_at(sq_shares, 0)
+        cur_share = reveal + self.shares[idx-1]
+        self.out_shares[idx] = cur_share
         
+        # Computing tau^{2^idx}.g and threshold public keys
+        self.powers[idx] = (self.g**reveal)*self.high_f_commits[idx-1][0]
+        self.th_powers[idx] = [(self.g**reveal)*self.low_f_commits[idx-1][i] for i in range(self.n+1)]
+        self.inc_idx = True
+        return cur_share
+
+    
     #@profile
     async def square(self, t_share, t_pk, tpks, params):
         """
@@ -111,67 +81,55 @@ class SQUARE:
         sqtag = f"SQ"                    
         send, recv = self.get_send(sqtag), self.subscribe_recv(sqtag)
         logger.debug("[%d] Starting squaring phase", self.my_id)
-        out_shares = {0: t_share}
-        powers = {0: t_pk}
-        th_powers = {0:tpks}
-
-        # TODO: The current implementation is very sequential and proceeds in rounds 
+        self.out_shares = {0: t_share}
+        self.powers = {0: t_pk}
+        self.th_powers = {0:tpks}
         self.shares, self.d_shares, self.low_f_commits, self.high_f_commits = params
+        
+        msg_buff = [[] for _ in range(self.logq)]
         cur_share = t_share
-        for idx in range(self.logq):
-            reveal_msg = cur_share*cur_share - self.d_shares[idx]
+        for idx in range(1, self.logq+1):
+            # Computing the reveal message
+            self.inc_idx = False
+            cur_share_sq = cur_share*cur_share
+            reveal_msg =  cur_share_sq - self.d_shares[idx-1]
+            # Proof of equality of discrete logarithm
+            cp = CP(self.g, self.g**cur_share, self.ZR, self.multiexp)
+            y = self.g**cur_share_sq
+            pf = cp.prove(cur_share, self.g**cur_share, y)
             for i in range(self.n):
-                send(i, (idx, reveal_msg))
-            
-            sq_shares = []
-            while True:
-                (sender, msg) = await recv()
-                s_idx, s_reveal = msg
+                send(i, (idx, reveal_msg, y, pf))
 
-                if s_idx == idx:
+            sq_shares = []
+            past_msgs = msg_buff[idx-1]
+            for msg in past_msgs:
+                sender, s_reveal, s_y, s_pf = msg
+                if sender == self.my_id:
+                    sq_shares.append([sender+1, s_reveal])
+                elif self.verify_sq(idx, sender, s_reveal, s_y, s_pf):
                     sq_shares.append([sender+1, s_reveal])
                     if len(sq_shares) > 2*self.t:
-                        reveal = self.poly.interpolate_at(sq_shares, 0)
-                        ran_commit = interpolate_g1_at_x(self.high_f_commits[idx], 0, self.G1, self.ZR)
-                        cur_share = reveal + self.shares[idx]
-                        out_shares[idx+1] = cur_share
-                        powers[idx+1] = (self.g**reveal)*ran_commit
-                        th_powers_idx = []
-                        for item in self.low_f_commits[idx]:
-                            node, value = item[0], item[1]
-                            th_powers_idx.append([node, (self.g**reveal)*value])
-                        th_powers[idx+1] = th_powers_idx
+                        cur_share = self.process(idx, sq_shares)
                         break
-        self.output_queue.put_nowait((out_shares, th_powers, powers))
+            
+            if self.inc_idx:
+                continue
+
+            while True:
+                (sender, msg) = await recv()
+                s_idx, s_reveal, s_y, s_pf = msg
+
+                if s_idx > idx:
+                    msg_buff[s_idx].append((sender, s_reveal, s_y, s_pf))
+                elif (s_idx == idx):
+                    if sender == self.my_id:
+                        sq_shares.append([sender+1, s_reveal])
+                    elif self.verify_sq(idx, sender, s_reveal, s_y, s_pf):
+                        sq_shares.append([sender+1, s_reveal])
+                        if len(sq_shares) > 2*self.t:
+                            cur_share = self.process(idx, sq_shares)                        
+                            break
+
+        self.output_queue.put_nowait((self.out_shares, self.th_powers, self.powers))
         return
-
-                # next = self._process_msg(sender, s_idx, s_reveal, idx)
-                # if next:
-                #     share = self.shares[idx]
-                #     reveal_msg = share*share + self.doubles[idx-1][1]
-                #     for i in range(self.n):
-                #         send(i, (SquareMessageType.DATA, idx, reveal_msg))
-                #     idx=idx+1
-
-                # if idx == self.logq:
-                #     self.output_queue.put_nowait((self.shares, self.square_tpks, self.square_pks))
-                #     break
-
-
-
-        # self.shares = [None*self.logq]
-        # self.square_tpks = {1:tpk}
-        # self.square_pks = {1:pk}
-        # self.shares[0] = share
-
-
-        
-        # Protocol Idea:
-        # 1. Store all SQ message: one per sender per index
-        # 2. Maintain the list of valid messages
-        # 2.1 Delete the invalid shares
-        # 3. Upon receiving enough valid messages for current index,
-        # 3.1 Compute the next index
-        # 3.2 Send the next message
-        # 4. Check if everything is complete: clean and return.
         

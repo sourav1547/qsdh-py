@@ -115,8 +115,8 @@ async def test_adkg(test_router):
         pt_commits  = outputs[i][6]
         csk = msk
         for ii in range(logq):
-            pt_power = interpolate_g1_at_x(pt_commits[ii], 0, G1, ZR)
-            assert pt_power == gs[0]**csk
+            # pt_power = interpolate_g1_at_x(pt_commits[ii], 0, G1, ZR)
+            assert pt_commits[ii][0] == gs[0]**csk
             csk = csk*csk 
 
     mks_set = outputs[0][1]

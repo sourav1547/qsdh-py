@@ -263,17 +263,16 @@ class RANDOUSHA:
             low_pk = interpolate_g1_at_x(low_f_commits[i], 0, self.G1, self.ZR)
             low_rk = interpolate_g1_at_x(low_f_randoms[i], 0, self.G1, self.ZR)
             assert low_pk*low_rk == self.com_z_0[i]
-
         # FIXME! Add the fallback path for the case when this assertion fails
-        pk_out_shares = pk_shares
-        low_out_commits = low_f_commits
-        high_out_commits = high_f_commits
-
-        # TODO:(@sourav) FIXME! To do FFT in the exponent here
-        # pk_out_shares = interpolate_g1_at_all(pk_shares, self.n, self.G1, self.ZR)
-        # low_out_commits = interpolate_g1_at_all(low_f_commits, self.n, self.G1, self.ZR)
-        # high_out_commits = interpolate_g1_at_all(high_f_commits, self.n, self.G1, self.ZR)
         
+        # TODO: To optimize this using NTT
+        pk_out_shares = interpolate_g1_at_all(pk_shares, self.n, self.G1, self.ZR)
+        low_out_commits =[None]*self.logq
+        high_out_commits=[None]*self.logq
+        for ii in range(self.logq):
+            low_out_commits[ii] = interpolate_g1_at_all(low_f_commits[ii], self.n, self.G1, self.ZR)
+            high_out_commits[ii] = interpolate_g1_at_all(high_f_commits[ii], self.n, self.G1, self.ZR)
+            
         return (pk, pk_out_shares, low_out_commits, high_out_commits)
 
     async def randousha(self, mks, acss_outputs):

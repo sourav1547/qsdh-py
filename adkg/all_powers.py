@@ -66,7 +66,7 @@ class ALL_POWERS:
         aptag = f"AP"                    
         send, recv = self.get_send(aptag), self.subscribe_recv(aptag)
         logger.debug("[%d] Starting all powers phase", self.my_id)
-        self.t_shares, self.t_commmits, self.t_powers = t_shares, t_commits, t_powers
+        self.t_shares, self.t_commits, self.t_powers = t_shares, t_commits, t_powers
 
         # TODO: The current implementation sends q group elements in each round
         bitlen  = '{0:0'+str(self.logq)+'b}'
