@@ -2797,6 +2797,59 @@ fn blsmultiexp(gs: &PyList, zrs: &PyList) -> PyResult<PyG1>{
     Ok(output)
 }
 
+#[pyfunction]
+fn blsfft(gs: &PyList, omega: &PyAny, n: usize) -> PyResult<Vec<PyG1>>{
+    gs.append(vec![0; n - gs.len()])?;
+    let mut gs_vec : Vec<PyG1> = Vec::new();
+    for item in gs {
+        let aicel: &PyCell<PyG1> = item.downcast()?;
+        let aif: &PyG1 = &aicel.borrow();
+        gs_vec.push(PyG1{ g1: aif.g1, pp: Vec::new(), pplevel:0 });
+    }
+    let aicel: &PyCell<PyFr> = omega.downcast()?;
+    let omega_new: &PyFr = &aicel.borrow();
+
+    let output = blsfft_helper(gs_vec, (*omega_new).clone());
+    Ok(output)
+}
+
+// #[pyfunction]
+fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
+    let n = gs.len();
+    if n == 1 {
+        return gs;
+    }
+    let mut odd = Vec::new();
+    let mut even = Vec::new();
+    for id in 0..n {
+        if id % 2 == 1 {
+            odd.push(gs[id].clone());
+        } else {
+            even.push(gs[id].clone());
+        }
+    }
+    let mut o = omega.clone();
+    let mut om = omega.clone();
+    om.square();
+
+    let odd_vec = blsfft_helper(odd, om.clone());
+    let even_vec = blsfft_helper(even, om.clone());
+
+    let mut result_vec : Vec<PyG1> = Vec::with_capacity(n);
+
+    for j in 0..n {
+        let k = j % (n / 2);
+        let fj = PyFr::new(None, None, None, Some(j as u64));
+        o.pow_assign(&fj);
+        let mut even = even_vec[k].clone();
+        even.mul_assign(&o);
+        let mut odd = odd_vec[k].clone();
+        odd.add_assign(&even);
+        result_vec[j] = odd.clone();
+    }
+    return result_vec;
+}
+
 //nvm, this appears to be way slower. Damn it all.
 /*#[pyfunction]
 fn blsmultiexp(gs: &PyList, zrs: &PyList) -> PyResult<PyG1>{
@@ -3225,6 +3278,7 @@ fn pypairing(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(dotprod))?;
     m.add_wrapped(wrap_pyfunction!(condense_list))?;
     m.add_wrapped(wrap_pyfunction!(blsmultiexp))?;
+    m.add_wrapped(wrap_pyfunction!(blsfft))?;
 
     m.add_wrapped(wrap_pyfunction!(hashcurve25519zrs))?;
     m.add_wrapped(wrap_pyfunction!(hashcurve25519gs))?;
