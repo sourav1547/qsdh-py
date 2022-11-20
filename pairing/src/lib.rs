@@ -2798,19 +2798,21 @@ fn blsmultiexp(gs: &PyList, zrs: &PyList) -> PyResult<PyG1>{
 }
 
 #[pyfunction]
-fn blsfft(gs: &PyList, omega: &PyAny, n: usize) -> PyResult<Vec<PyG1>>{
-    gs.append(vec![0; n - gs.len()])?;
+fn blsfft(gs: &PyList, omega: &PyAny) -> PyResult<Vec<PyG1>>{
+    let n = 4;
     let mut gs_vec : Vec<PyG1> = Vec::new();
-    for item in gs {
-        let aicel: &PyCell<PyG1> = item.downcast()?;
+    for gi in gs.iter() {
+        let aicel: &PyCell<PyG1> = gi.downcast()?;
         let aif: &PyG1 = &aicel.borrow();
         gs_vec.push(PyG1{ g1: aif.g1, pp: Vec::new(), pplevel:0 });
     }
+    for _ in 0..n-gs.len() {
+        gs_vec.push(PyG1::new());
+    }
     let aicel: &PyCell<PyFr> = omega.downcast()?;
     let omega_new: &PyFr = &aicel.borrow();
-
     let output = blsfft_helper(gs_vec, (*omega_new).clone());
-    Ok(output)
+    return Ok(output);
 }
 
 // #[pyfunction]
@@ -2831,12 +2833,10 @@ fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
     let mut o = omega.clone();
     let mut om = omega.clone();
     om.square();
-
     let odd_vec = blsfft_helper(odd, om.clone());
     let even_vec = blsfft_helper(even, om.clone());
 
-    let mut result_vec : Vec<PyG1> = Vec::with_capacity(n);
-
+    let mut result_vec : Vec<PyG1> = Vec::new();
     for j in 0..n {
         let k = j % (n / 2);
         let fj = PyFr::new(None, None, None, Some(j as u64));
@@ -2845,7 +2845,7 @@ fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
         even.mul_assign(&o);
         let mut odd = odd_vec[k].clone();
         odd.add_assign(&even);
-        result_vec[j] = odd.clone();
+        result_vec.push(odd.clone());
     }
     return result_vec;
 }
