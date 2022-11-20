@@ -25,8 +25,14 @@ def interpolate_g1_at_x(coords, x, G1, ZR, order=-1):
         out *= (sortedcoords[i][1] ** (lagrange_at_x(s, xs[i], x, ZR)))
     return out
 
-def get_coeffs(coords, G1, ZR, order=-1):
-    return coords
+
+def get_g1_coeffs(coords, t, n, G1, ZR, order=-1):
+    coeffs = [G1.identity()]*(t+1)
+    # FIXME: This is an incorrect implementation.
+    # Currently this is just a place holder
+    for i in range(t+1):
+        coeffs[i] = coords[i][1]
+    return coeffs
 
 # To optimize this using NTT
 def interpolate_g1_at_all(coords, n, G1, ZR, order=-1):

@@ -1,9 +1,9 @@
 import asyncio
-from collections import defaultdict
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
-from adkg.utils.poly_misc import interpolate_g1_at_x
+from adkg.utils.poly_misc import evaluate_g1_at_all, interpolate_g1_at_x, get_g1_coeffs
+from adkg.extra_proofs import CP
 
 
 import logging
@@ -12,7 +12,9 @@ logger.setLevel(logging.ERROR)
 
 # Uncomment this when you want logs from this file.
 # logger.setLevel(logging.DEBUG)
-
+class APMsgType:
+    SHARE = "S"
+    EVAL = "E"
 
 class ALL_POWERS:
     #@profile
@@ -37,27 +39,69 @@ class ALL_POWERS:
             return wrap_send(tag, send)
 
         self.get_send = _send
-
-        self.sq_status = defaultdict(lambda: True)
         self.poly = polynomials_over(self.ZR)
         self.poly.clear_cache()
         self.output_queue = asyncio.Queue()
-        self.tagvars = {}
-        self.tasks = []
-        self.data = {}
 
     def __enter__(self):
         return self
 
     def kill(self):
         self.subscribe_recv_task.cancel()
-        for task in self.tasks:
-            task.cancel()
-        for key in self.tagvars:
-            for task in self.tagvars[key]['tasks']:
-                task.cancel()
 
-      
+    def batch_mul_shares(self, cur_share, cur_powers):
+        m = len(cur_powers)
+        padding = 0 + (m%(self.t+1) != 0)
+        ell = m//(self.t+1) + padding
+        polys = [None]*ell
+        for i in range(ell):
+            if i == ell-1 and padding:
+                polys[i] = cur_powers[i*(self.t+1):m]
+            else:
+                polys[i] = cur_powers[i*(self.t+1): (i+1)*(self.t+1)]
+        
+        cp = CP(self.g, self.g**cur_share, self.ZR, self.multiexp)
+        evals = [evaluate_g1_at_all(polys[i], self.n, self.ZR, self.multiexp) for i in range(ell)]
+        out_evals = [[evals[i][node]**cur_share for i in range(ell)] for node in range(self.n)]
+        proofs = [[cp.prove(cur_share, evals[i][node], out_evals[node][i]) for i in range(ell)] for node in range(self.n)]
+        
+        return (out_evals, proofs)
+    
+    def gen_eval_shares(self, idx, all_shares):
+        m = 2**idx
+        ell = m//(self.t+1) + (m%(self.t+1) != 0)
+        outputs = [self.G1.identity()]*ell
+        for loc in range(ell):
+            coords = []
+            for node, shares in all_shares.items():
+                coords.append([node+1, shares[loc]])
+            outputs[loc] = interpolate_g1_at_x(coords, 0, self.G1, self.ZR)
+        return outputs
+        
+
+    def gen_next_powers(self, idx, all_evals):
+        m = 2**idx
+        padding  = 0 + (m%(self.t+1) != 0)
+        ell = m//(self.t+1) + padding
+        outputs = [self.G1.identity()]*m
+        for i in range(ell):
+            coords = []
+            for node, evals in all_evals.items():
+                coords.append([node, evals[i]])
+
+            if i == ell-1 and padding:
+                outputs[i*(self.t+1):i*(self.t+1)+m] = get_g1_coeffs(coords, self.t, self.n, self.G1, self.ZR)[:m%(self.t+1)]
+            else:
+                outputs[i*(self.t+1):(i+1)*(self.t+1)] = get_g1_coeffs(coords, self.t, self.n, self.G1, self.ZR)
+        return outputs
+
+    def verify_share(self, sender, s_idx, s_msg):
+        powers, pfs = s_msg
+        return True
+    
+    def verify_eval(self, sender, s_idx, s_msg):
+        return True
+
     #@profile
     async def powers(self, t_shares, t_commits, t_powers):
         """
@@ -68,34 +112,44 @@ class ALL_POWERS:
         logger.debug("[%d] Starting all powers phase", self.my_id)
         self.t_shares, self.t_commits, self.t_powers = t_shares, t_commits, t_powers
 
-        # TODO: The current implementation sends q group elements in each round
-        bitlen  = '{0:0'+str(self.logq)+'b}'
-        powers = [self.g]*self.q
+        msg_buff = [{APMsgType.SHARE:{}, APMsgType.EVAL:{}} for _ in range(self.logq)]
+        cur_powers = [self.g]
+
+        
         for idx in range(self.logq):
-            out_msg = [None]*self.q
-            cur_share = t_shares[self.logq-idx-1]
-            bit_idx = [1 if int(bitlen.format(a)[idx]) else 0 for a in range(self.q)]
-            out_msg = [powers[a]**cur_share if bit_idx[a] else None for a in range(self.q)]
-            
-            for i in range(self.n):
-                send(i, (idx, out_msg))
-            
-            in_msgs, in_count = [[] for _ in range(self.q)], 0
+            cur_share = self.t_shares[idx]
+            share_msgs, share_pfs = self.batch_mul_shares(cur_share, cur_powers)
+            for node in range(self.n):
+                send(node, (APMsgType.SHARE, idx, (share_msgs[node], share_pfs[node])))
+        
+            temp_shares = {}
+            temp_evals = {}
             while True:
                 (sender, msg) = await recv()
-                s_idx, s_powers = msg
-                assert len(s_powers) == self.q
+                s_type, s_idx, s_msg = msg
                 
-                if s_idx == idx:
-                    in_count = in_count+1
-                    for a in range(self.q):
-                        if bit_idx[a]:
-                            in_msgs[a].append([sender+1, s_powers[a]])
-                            
-                if in_count > self.t:
-                    for a in range(self.q):
-                        if bit_idx[a]:
-                            powers[a] = interpolate_g1_at_x(in_msgs[a], 0, self.G1, self.ZR)
-                    break
-        self.output_queue.put_nowait(powers)
+                # Buffering future messages
+                if s_idx > idx:
+                    msg_buff[s_type][sender] = msg
+                elif s_idx == idx:
+                    # Only makes sense to process if have not processed already
+                    if s_type == APMsgType.SHARE and len(temp_shares) <= self.t:    
+                        if self.verify_share(sender, s_idx, s_msg):
+                            powers, _ = s_msg # second coodinates are proofs
+                            temp_shares[sender] = powers
+                        if len(temp_shares) == self.t+1:
+                            eval_msg = self.gen_eval_shares(idx, temp_shares)
+                            for i in range(self.n):
+                                send(i, (APMsgType.EVAL, idx, eval_msg))
+                    
+                    elif s_type == APMsgType.EVAL:
+                        if self.verify_eval(sender, s_idx, s_msg):
+                            temp_evals[sender] = s_msg
+                        if len(temp_evals) == self.t+1:
+                            next_powers = self.gen_next_powers(idx, temp_evals)
+                            # Updating cur_powers as [cur_powers, next_powers]
+                            cur_powers = cur_powers + next_powers
+                            break
+
+        self.output_queue.put_nowait(cur_powers)
         return
