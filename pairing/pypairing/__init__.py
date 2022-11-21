@@ -23,7 +23,8 @@ from .pypairing import (
     hashcurve25519gsbn,
     curve25519dotprod,
     curve25519multiexp,
-    blsmultiexp
+    blsmultiexp,
+    blsfft
 )
 
 __all__ = [
@@ -49,5 +50,6 @@ __all__ = [
     "hashcurve25519gsbn",
     "curve25519dotprod",
     "curve25519multiexp",
-    "blsmultiexp"
+    "blsmultiexp",
+    "blsfft"
 ]
