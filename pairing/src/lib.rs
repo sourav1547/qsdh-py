@@ -45,8 +45,9 @@ extern crate hex;
 extern crate group;
 extern crate rand_core;
 extern crate rand_chacha;
+extern crate log;
 
-
+use log::debug;
 
 #[cfg(test)]
 pub mod tests;
@@ -2799,18 +2800,22 @@ fn blsmultiexp(gs: &PyList, zrs: &PyList) -> PyResult<PyG1>{
 
 #[pyfunction]
 fn blsfft(gs: &PyList, omega: &PyAny, n: usize) -> PyResult<Vec<PyG1>>{
-    gs.append(vec![0; n - gs.len()])?;
     let mut gs_vec : Vec<PyG1> = Vec::new();
-    for item in gs {
-        let aicel: &PyCell<PyG1> = item.downcast()?;
+    for gi in gs.iter() {
+        let aicel: &PyCell<PyG1> = gi.downcast()?;
         let aif: &PyG1 = &aicel.borrow();
         gs_vec.push(PyG1{ g1: aif.g1, pp: Vec::new(), pplevel:0 });
     }
+
+    let mut zero = PyG1::new();
+    zero.zero();
+    for _ in 0..n-gs.len() {
+        gs_vec.push(zero.clone());
+    }
     let aicel: &PyCell<PyFr> = omega.downcast()?;
     let omega_new: &PyFr = &aicel.borrow();
-
     let output = blsfft_helper(gs_vec, (*omega_new).clone());
-    Ok(output)
+    return Ok(output);
 }
 
 // #[pyfunction]
@@ -2819,6 +2824,11 @@ fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
     if n == 1 {
         return gs;
     }
+    // eprint!("gs=");
+    // for item in gs.clone() {
+    //     eprintln!("{:?}, ", item.g1);
+    // }
+    // eprintln!("");
     let mut odd = Vec::new();
     let mut even = Vec::new();
     for id in 0..n {
@@ -2828,24 +2838,33 @@ fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
             even.push(gs[id].clone());
         }
     }
-    let mut o = omega.clone();
     let mut om = omega.clone();
+    // eprintln!("n={} om^1={:?}", n, om.fr);
     om.square();
-
+    // eprintln!("n={} om^2={:?}", n, om.fr);
     let odd_vec = blsfft_helper(odd, om.clone());
     let even_vec = blsfft_helper(even, om.clone());
 
-    let mut result_vec : Vec<PyG1> = Vec::with_capacity(n);
-
+    let mut result_vec : Vec<PyG1> = Vec::new();
     for j in 0..n {
+        // eprintln!("j={}", j);
         let k = j % (n / 2);
-        let fj = PyFr::new(None, None, None, Some(j as u64));
+        // eprintln!("k={}", k);
+        let fj = PyFr{fr: Fr::from_repr(FrRepr([j as u64, 0, 0, 0])).unwrap()};
+        // eprintln!("fj={:?}", fj.fr);
+        let mut o = omega.clone();
+        // eprintln!("j={} o^1={:?}", j, o.fr);
         o.pow_assign(&fj);
-        let mut even = even_vec[k].clone();
-        even.mul_assign(&o);
-        let mut odd = odd_vec[k].clone();
-        odd.add_assign(&even);
-        result_vec[j] = odd.clone();
+        // eprintln!("j={} o^j={:?}", j, o.fr);
+        let mut odd_ = odd_vec[k].clone();
+        // eprintln!("odd={:?}", odd_.g1);
+        odd_.mul_assign(&o);
+        // eprintln!("odd mul={:?}", odd_.g1);
+        let mut even_ = even_vec[k].clone();
+        // eprintln!("even={:?}", even_.g1);
+        even_.add_assign(&odd_);
+        // eprintln!("even add={:?}", even_.g1);
+        result_vec.push(even_.clone());
     }
     return result_vec;
 }
