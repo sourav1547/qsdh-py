@@ -1,14 +1,14 @@
 from adkg.poly_commit_hybrid import PolyCommitHybrid
 from pytest import mark
 from adkg.polynomial import polynomials_over
-from adkg.utils.poly_misc import interpolate_g1_at_x
+from adkg.utils.poly_misc import get_omega
 from adkg.adkg import ADKG
 import asyncio
 import numpy as np
 import math
 import uvloop
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-from pypairing import ZR, G1, blsmultiexp as multiexp, dotprod
+from pypairing import ZR, G1, blsmultiexp as multiexp, dotprod, blsfft
 # from pypairing import Curve25519ZR as ZR, Curve25519G as G1, curve25519multiexp as multiexp, curve25519dotprod as dotprod
     
 import time
@@ -38,9 +38,10 @@ def gen_vector(t, n):
 @mark.asyncio
 async def test_adkg(test_router):
     t = 1
-    logq = 5
+    logq = 4
     q = 2**logq
     n = 3 * t + 1
+    omega = get_omega(ZR, n)
     gs, h, pks, sks = get_avss_params(n, logq, G1)
     sends, recvs, _ = test_router(n, maxdelay=0.01)
     pc = PolyCommitHybrid(gs, h, ZR, multiexp)
@@ -50,10 +51,10 @@ async def test_adkg(test_router):
     dkg_list = [None] * n #
 
     start_time = time.time()
-    curve_params = (ZR, G1, multiexp, dotprod)
+    curve_params = (ZR, G1, multiexp, dotprod, blsfft)
 
     for i in range(n):
-        dkg = ADKG(pks, sks[i], gs, h, n, t, logq, i, sends[i], recvs[i], pc, curve_params, (mat1, mat2))
+        dkg = ADKG(pks, sks[i], gs, h, n, t, logq, i, omega, sends[i], recvs[i], pc, curve_params, (mat1, mat2))
         dkg_list[i] = dkg
         dkg_tasks[i] = asyncio.create_task(dkg.run_adkg(start_time))
     

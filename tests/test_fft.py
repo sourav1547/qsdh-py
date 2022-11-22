@@ -12,7 +12,7 @@ def get_omega(field, n, seed=None):
     """
     assert n & n - 1 == 0, "n must be a power of 2"
     x = field.rand(seed)
-    y = x**int(ZR(-1)/n)
+    y = x**int(field(-1)/n)
     if y == 1 or y**(n//2) == 1:
         return get_omega(field, n)
     assert y**n == 1, "omega must be 2n'th root of unity"
@@ -20,7 +20,7 @@ def get_omega(field, n, seed=None):
     return y
 
 def test_fft():
-    for i in range(10): 
+    for i in range(5): 
         n = 2**(i+2)
         t = random.randint(1, n-1)
         g = G1.rand(b'g')
@@ -28,7 +28,6 @@ def test_fft():
         omega = get_omega(ZR, n)
 
         p = polynomials_over(ZR)
-        # p.__init__(poly, coeffs)
         poly = p.random(t)
 
         eval_scalar = poly.evaluate_fft(omega, n)

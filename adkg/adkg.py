@@ -25,14 +25,15 @@ class ADKGMsgType:
     RDS = "D"
     
 class ADKG:
-    def __init__(self, public_keys, private_key, gs, h, n, t, logq, my_id, send, recv, pc, curve_params, matrices):
+    def __init__(self, public_keys, private_key, gs, h, n, t, logq, my_id, omega, send, recv, pc, curve_params, matrices):
         self.public_keys, self.private_key, self.gs, self.h = (public_keys, private_key, gs, h)
-        self.n, self.t, self.logq, self.my_id = (n, t, logq, my_id)
+        self.n, self.t, self.logq, self.my_id, self.omega = (n, t, logq, my_id, omega)
         self.q = 2**self.logq
         # Total number of secrets: 1 for ACS, 1 for tau, logq*(1+2) for random double sharing
         self.sc = 3*self.logq + 2 
         self.send, self.recv, self.pc = (send, recv, pc)
-        self.ZR, self.G1, self.multiexp, self.dotprod = curve_params
+        self.curve_params = curve_params
+        self.ZR, self.G1, self.multiexp, self.dotprod, self.blsfft = self.curve_params
         self.poly = polynomials_over(self.ZR)
         self.poly.clear_cache() #FIXME: Not sure why we need this.
         # Create a mechanism to split the `recv` channels based on `tag`
@@ -293,7 +294,7 @@ class ADKG:
     async def all_powers(self, t_shares, t_commits, t_powers):
         aptag = ADKGMsgType.AP
         apsend, aprecv = self.get_send(aptag), self.subscribe_recv(aptag)
-        self.ap = ALL_POWERS(self.gs[0], self.h, self.n, self.t, self.logq, self.my_id, apsend, aprecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
+        self.ap = ALL_POWERS(self.gs[0], self.h, self.n, self.t, self.logq, self.my_id, self.omega, apsend, aprecv, self.curve_params)
         self.ap_task = asyncio.create_task(self.ap.powers(t_shares, t_commits, t_powers))
         powers  = await self.ap.output_queue.get()
         return powers

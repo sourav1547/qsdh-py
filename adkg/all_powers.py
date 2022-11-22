@@ -2,7 +2,7 @@ import asyncio
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
-from adkg.utils.poly_misc import evaluate_g1_at_all, interpolate_g1_at_x, get_g1_coeffs
+from adkg.utils.poly_misc import interpolate_g1_at_x, interpolate_g1_at
 from adkg.extra_proofs import CP
 
 
@@ -19,12 +19,13 @@ class APMsgType:
 class ALL_POWERS:
     #@profile
     def __init__(
-            self, g, h, n, t, logq, my_id, send, recv, curve_params
+            self, g, h, n, t, logq, my_id, omega, send, recv, curve_params
     ):  # (# noqa: E501)
         self.n, self.t, self.logq, self.my_id = n, t, logq, my_id
         self.q = 2**self.logq
         self.g, self.h = g, h
-        self.ZR, self.G1, self.multiexp, self.dotprod = curve_params
+        self.omega = omega
+        self.ZR, self.G1, self.multiexp, self.dotprod, self.blsfft = curve_params
         self.sr = Serial(self.G1)
 
         self.benchmark_logger = logging.LoggerAdapter(
@@ -61,10 +62,9 @@ class ALL_POWERS:
                 polys[i] = cur_powers[i*(self.t+1): (i+1)*(self.t+1)]
         
         cp = CP(self.g, self.g**cur_share, self.ZR, self.multiexp)
-        evals = [evaluate_g1_at_all(polys[i], self.n, self.ZR, self.multiexp) for i in range(ell)]
+        evals = [self.blsfft(polys[i], self.omega, self.n) for i in range(ell)] 
         out_evals = [[evals[i][node]**cur_share for i in range(ell)] for node in range(self.n)]
         proofs = [[cp.prove(cur_share, evals[i][node], out_evals[node][i]) for i in range(ell)] for node in range(self.n)]
-        
         return (out_evals, proofs)
     
     def gen_eval_shares(self, idx, all_shares):
@@ -75,7 +75,7 @@ class ALL_POWERS:
             coords = []
             for node, shares in all_shares.items():
                 coords.append([node+1, shares[loc]])
-            outputs[loc] = interpolate_g1_at_x(coords, 0, self.G1, self.ZR)
+            outputs[loc] = interpolate_g1_at_x(coords, 0, self.G1, self.ZR)            
         return outputs
         
 
@@ -84,15 +84,19 @@ class ALL_POWERS:
         padding  = 0 + (m%(self.t+1) != 0)
         ell = m//(self.t+1) + padding
         outputs = [self.G1.identity()]*m
+        n_zr_inv = self.ZR(self.n)**(-1)
+
         for i in range(ell):
-            coords = []
+            coords = [None]*self.n
             for node, evals in all_evals.items():
-                coords.append([node, evals[i]])
+                coords[node] = evals[i]
 
             if i == ell-1 and padding:
-                outputs[i*(self.t+1):i*(self.t+1)+m] = get_g1_coeffs(coords, self.t, self.n, self.G1, self.ZR)[:m%(self.t+1)]
+                fft_inv = self.blsfft(coords, self.omega**(-1), self.n)
+                outputs[i*(self.t+1):i*(self.t+1)+m] = [x**n_zr_inv for x in fft_inv[:m%(self.t+1)]]
             else:
-                outputs[i*(self.t+1):(i+1)*(self.t+1)] = get_g1_coeffs(coords, self.t, self.n, self.G1, self.ZR)
+                fft_inv = self.blsfft(coords, self.omega**(-1), self.n)
+                outputs[i*(self.t+1):(i+1)*(self.t+1)] = [x**n_zr_inv for x in fft_inv[:self.t+1]]
         return outputs
 
     def verify_share(self, sender, s_idx, s_msg):
@@ -145,7 +149,7 @@ class ALL_POWERS:
                     elif s_type == APMsgType.EVAL:
                         if self.verify_eval(sender, s_idx, s_msg):
                             temp_evals[sender] = s_msg
-                        if len(temp_evals) == self.t+1:
+                        if len(temp_evals) == self.n:
                             next_powers = self.gen_next_powers(idx, temp_evals)
                             # Updating cur_powers as [cur_powers, next_powers]
                             cur_powers = cur_powers + next_powers

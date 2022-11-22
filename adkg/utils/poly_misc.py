@@ -1,3 +1,22 @@
+# This function outputs roots of unity
+
+def get_omega(field, n, seed=None):
+    """
+    Given a field, this method returns an n^th root of unity.
+    If the seed is not None then this method will return the
+    same n'th root of unity for every run with the same seed
+
+    This only makes sense if n is a power of 2!
+    """
+    assert n & n - 1 == 0, "n must be a power of 2"
+    x = field.rand(seed)
+    y = x**int(field(-1)/n)
+    if y == 1 or y**(n//2) == 1:
+        return get_omega(field, n)
+    assert y**n == 1, "omega must be 2n'th root of unity"
+    assert y**(n // 2) != 1, "omega must be primitive 2n'th root of unity"
+    return y
+
 # Helper Functions
 def lagrange_at_x(s, j, x, ZR):
     s = sorted(s)
@@ -24,6 +43,26 @@ def interpolate_g1_at_x(coords, x, G1, ZR, order=-1):
     for i in range(order):
         out *= (sortedcoords[i][1] ** (lagrange_at_x(s, xs[i], x, ZR)))
     return out
+
+from functools import reduce
+import operator
+def interpolate_g1_at(shares, x_recomb, multiexp, ZR):
+    # shares are in the form (x, y=f(x))
+    if type(x_recomb) is int:
+        x_recomb = ZR(x_recomb)
+    xs, ys = zip(*shares)
+    vector = []
+    for i, x_i in enumerate(xs):
+        factors = [
+            #(x_k - x_recomb) / (x_k - x_i) for k, x_k in enumerate(xs) if k != i
+            (x_recomb - x_k) / (x_i - x_k) for k, x_k in enumerate(xs) if k != i
+        ]
+        vector.append(reduce(operator.mul, factors))
+    #return sum(map(operator.mul, ys, vector))
+    #sum = field(0)
+    #for i in map(operator.mul, vector, ys):
+        #sum += i
+    return multiexp(list(ys), vector)
 
 
 def get_g1_coeffs(coords, t, n, G1, ZR, order=-1):
