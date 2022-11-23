@@ -37,10 +37,11 @@ def gen_vector(t, n):
 
 @mark.asyncio
 async def test_adkg(test_router):
-    t = 1
-    logq = 4
+    t = 2
+    logq = 6
     q = 2**logq
-    n = 3 * t + 1
+    n = 3*t+1
+    n = 8
     omega = get_omega(ZR, n)
     g, h, g2, pks, sks = get_avss_params(n, logq, G1, G2)
     sends, recvs, _ = test_router(n, maxdelay=0.01)

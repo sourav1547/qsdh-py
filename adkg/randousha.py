@@ -1,7 +1,7 @@
 import asyncio
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
-from adkg.utils.poly_misc import interpolate_g1_at_x, interpolate_g1_at_all, evaluate_g1_at_all
+from adkg.utils.poly_misc import interpolate_g1_at_x, interpolate_g1_at_all
 from adkg.extra_proofs import PoK
 
 

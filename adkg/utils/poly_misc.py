@@ -84,6 +84,19 @@ def interpolate_g1_at_all(coords, n, G1, ZR, order=-1):
             outputs[idx] = interpolate_g1_at_x(coords, idx, G1, ZR, order)
     return outputs
 
+
+# To optimize this using NTT
+def prep_for_fft(coords, omega, n, multiexp, ZR):
+    lag_coords = []
+    for idx in range(n):
+        if coords[idx] is not None:
+            lag_coords.append([omega**idx, coords[idx]])        
+    
+    for idx in range(n): 
+        if coords[idx] == None:
+            coords[idx] = interpolate_g1_at(lag_coords, omega**idx, multiexp, ZR)
+    return coords
+
 # To optimize this using NTT
 def evaluate_g1_at_all(coeffs, n, ZR, multiexp):
     return [evaluate_g1_at_x(coeffs, x, ZR, multiexp) for x in range(1,n+1)]

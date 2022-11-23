@@ -2,9 +2,9 @@ import asyncio
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
-from adkg.utils.poly_misc import interpolate_g1_at_x
+from adkg.utils.poly_misc import interpolate_g1_at_x, prep_for_fft
 from adkg.extra_proofs import CP
-from pypairing import blsmultiexp2, pair, G2
+from pypairing import pair
 
 
 import logging
@@ -54,14 +54,14 @@ class ALL_POWERS:
 
     def batch_mul_shares(self, cur_share, cur_powers):
         m = len(cur_powers)
-        padding = 0 + (m%(self.t+1) != 0)
-        ell = m//(self.t+1) + padding
+        padding = 0 + (m%(self.deg) != 0)
+        ell = m//(self.deg) + padding
         polys = [None]*ell
         for i in range(ell):
             if i == ell-1 and padding:
-                polys[i] = cur_powers[i*(self.t+1):m]
+                polys[i] = cur_powers[i*(self.deg):m]
             else:
-                polys[i] = cur_powers[i*(self.t+1): (i+1)*(self.t+1)]
+                polys[i] = cur_powers[i*(self.deg): (i+1)*(self.deg)]
         
         
         self.evals = [self.blsfft(polys[i], self.omega, self.n) for i in range(ell)] 
@@ -78,7 +78,7 @@ class ALL_POWERS:
     
     def gen_eval_shares(self, idx, all_shares):
         m = 2**idx
-        ell = m//(self.t+1) + (m%(self.t+1) != 0)
+        ell = m//(self.deg) + (m%(self.deg) != 0)
         outputs = [self.G1.identity()]*ell
         for loc in range(ell):
             coords = []
@@ -90,21 +90,22 @@ class ALL_POWERS:
 
     def gen_next_powers(self, idx, all_evals):
         m = 2**idx
-        padding  = 0 + (m%(self.t+1) != 0)
-        ell = m//(self.t+1) + padding
+        padding  = 0 + (m%(self.deg) != 0)
+        ell = m//(self.deg) + padding
         outputs = [self.G1.identity()]*m
 
         for i in range(ell):
             coords = [None]*self.n
             for node, evals in all_evals.items():
                 coords[node] = evals[i]
-
+            coords = prep_for_fft(coords, self.omega, self.n, self.multiexp, self.ZR)
+            
             if i == ell-1 and padding:
                 fft_inv = self.blsfft(coords, self.omegainv, self.n)
-                outputs[i*(self.t+1):i*(self.t+1)+m] = [x**self.ninv for x in fft_inv[:m%(self.t+1)]]
+                outputs[i*(self.deg):i*(self.deg)+m] = [x**self.ninv for x in fft_inv[:m%(self.deg)]]
             else:
                 fft_inv = self.blsfft(coords, self.omegainv, self.n)
-                outputs[i*(self.t+1):(i+1)*(self.t+1)] = [x**self.ninv for x in fft_inv[:self.t+1]]
+                outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
         return outputs
 
     def verify_share(self, sender, s_idx, s_msg):
@@ -153,6 +154,7 @@ class ALL_POWERS:
         send, recv = self.get_send(aptag), self.subscribe_recv(aptag)
         logger.debug("[%d] Starting all powers phase", self.my_id)
         self.t_shares, self.t_commits, self.t_powers, self.g2powers = t_shares, t_commits, t_powers, g2powers
+        self.deg = self.n-self.t
 
         self.msg_buff = [{APMsgType.SHARE:{}, APMsgType.EVAL:{}} for _ in range(self.logq)]
         cur_powers = [self.g]
@@ -165,7 +167,7 @@ class ALL_POWERS:
                 send(node, (APMsgType.SHARE, idx, (share_msgs[node], share_pfs[node])))
 
             temp_shares = self.verify_msgs(APMsgType.SHARE, idx)
-            if len(temp_shares) == self.t+1:
+            if len(temp_shares) == self.deg:
                 eval_msg = self.gen_eval_shares(idx, temp_shares)
                 for i in range(self.n):
                     send(i, (APMsgType.EVAL, idx, eval_msg))
@@ -192,7 +194,7 @@ class ALL_POWERS:
                     elif s_type == APMsgType.EVAL:
                         if self.verify_eval(sender, s_idx, s_msg):
                             temp_evals[sender] = s_msg
-                        if len(temp_evals) == self.n:
+                        if len(temp_evals) == self.deg:
                             next_powers = self.gen_next_powers(idx, temp_evals)
                             # Updating cur_powers as [cur_powers, next_powers]
                             cur_powers = cur_powers + next_powers
