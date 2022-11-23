@@ -2,7 +2,6 @@ import asyncio
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
-from adkg.utils.poly_misc import interpolate_g1_at_x
 from adkg.extra_proofs import CP
 
 

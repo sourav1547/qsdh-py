@@ -38,7 +38,7 @@ def gen_vector(t, n):
 @mark.asyncio
 async def test_adkg(test_router):
     t = 1
-    logq = 4
+    logq = 6
     q = 2**logq
     n = 3 * t + 1
     omega = get_omega(ZR, n)
