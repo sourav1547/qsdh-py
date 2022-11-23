@@ -25,8 +25,9 @@ class ADKGMsgType:
     RDS = "D"
     
 class ADKG:
-    def __init__(self, public_keys, private_key, gs, h, n, t, logq, my_id, omega, send, recv, pc, curve_params, matrices):
-        self.public_keys, self.private_key, self.gs, self.h = (public_keys, private_key, gs, h)
+    def __init__(self, public_keys, private_key, g, h, g2, n, t, logq, my_id, omega, send, recv, pc, curve_params, matrices):
+        self.public_keys, self.private_key, self.g, self.h = (public_keys, private_key, g, h)
+        self.g2 = g2
         self.n, self.t, self.logq, self.my_id, self.omega = (n, t, logq, my_id, omega)
         self.q = 2**self.logq
         # Total number of secrets: 1 for ACS, 1 for tau, logq*(1+2) for random double sharing
@@ -77,7 +78,7 @@ class ADKG:
     async def acss_step(self, outputs, values, acss_signal):
         acsstag = ADKGMsgType.ACSS
         acsssend, acssrecv = self.get_send(acsstag), self.subscribe_recv(acsstag)
-        self.acss = ACSS_HT(self.public_keys, self.private_key, self.gs, self.h, self.n, self.t, self.sc, self.my_id, acsssend, acssrecv, self.pc, self.ZR, self.G1)
+        self.acss = ACSS_HT(self.public_keys, self.private_key, self.g, self.h, self.n, self.t, self.sc, self.my_id, acsssend, acssrecv, self.pc, self.ZR, self.G1)
         self.acss_tasks = [None] * self.n
         for i in range(self.n):
             if i == self.my_id:
@@ -277,7 +278,7 @@ class ADKG:
         # Invoke the protocol for randomness extraction
         rdstag = ADKGMsgType.RDS
         rdssend, rdsrecv = self.get_send(rdstag), self.subscribe_recv(rdstag)
-        self.rds = RANDOUSHA(self.gs, self.h, self.n, self.t, self.logq, self.my_id, rdssend, rdsrecv, (self.ZR, self.G1, self.multiexp, self.dotprod), self.matrix)
+        self.rds = RANDOUSHA(self.g, self.h, self.n, self.t, self.logq, self.my_id, rdssend, rdsrecv, (self.ZR, self.G1, self.multiexp, self.dotprod), self.matrix)
         self.rds_task = asyncio.create_task(self.rds.randousha(self.mks, acss_outputs))
         outputs  = await self.rds.output_queue.get()
         return outputs
@@ -285,17 +286,17 @@ class ADKG:
     async def squaring(self, t_share, t_pk, t_commits, params):
         sqtag = ADKGMsgType.SQ
         sqsend, sqrecv = self.get_send(sqtag), self.subscribe_recv(sqtag)
-        self.sq = SQUARE(self.gs[0], self.h, self.n, self.t, self.logq, self.my_id, sqsend, sqrecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
+        self.sq = SQUARE(self.g, self.g2, self.n, self.t, self.logq, self.my_id, sqsend, sqrecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
         self.sq_task = asyncio.create_task(self.sq.square(t_share, t_pk, t_commits, params))
         # powers-of-two shares, powers-of-two commits, and already computed powers
-        pt_shares, pt_commits, powers  = await self.sq.output_queue.get()
-        return (pt_shares, pt_commits, powers)
+        pt_shares, pt_commits, powers, g2powers  = await self.sq.output_queue.get()
+        return (pt_shares, pt_commits, powers, g2powers)
     
-    async def all_powers(self, t_shares, t_commits, t_powers):
+    async def all_powers(self, t_shares, t_commits, t_powers, g2powers):
         aptag = ADKGMsgType.AP
         apsend, aprecv = self.get_send(aptag), self.subscribe_recv(aptag)
-        self.ap = ALL_POWERS(self.gs[0], self.h, self.n, self.t, self.logq, self.my_id, self.omega, apsend, aprecv, self.curve_params)
-        self.ap_task = asyncio.create_task(self.ap.powers(t_shares, t_commits, t_powers))
+        self.ap = ALL_POWERS(self.g, self.g2, self.n, self.t, self.logq, self.my_id, self.omega, apsend, aprecv, self.curve_params)
+        self.ap_task = asyncio.create_task(self.ap.powers(t_shares, t_commits, t_powers, g2powers))
         powers  = await self.ap.output_queue.get()
         return powers
         
@@ -320,8 +321,8 @@ class ADKG:
         mks, t_share, t_pk, pks, shares, d_shares, low_f_commits, high_f_commits = output
         params = (shares, d_shares, low_f_commits, high_f_commits)
         sq_task = asyncio.create_task(self.squaring(t_share, t_pk, pks, params))
-        pt_shares, pt_commits, t_powers = await sq_task
-        ap_task = asyncio.create_task(self.all_powers(pt_shares, pt_commits, t_powers))
+        pt_shares, pt_commits, t_powers, g2powers = await sq_task
+        ap_task = asyncio.create_task(self.all_powers(pt_shares, pt_commits, t_powers, g2powers))
         powers = await ap_task
         # create_qsdh_task = asyncio.create_task(self.qsdh(output))
         # params = await create_qsdh_task

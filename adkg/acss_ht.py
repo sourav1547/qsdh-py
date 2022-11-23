@@ -28,11 +28,11 @@ class HbAVSSMessageType:
 class ACSS_HT:
     #@profile
     def __init__(
-            self, public_keys, private_key, gs, h, n, t, sc, my_id, send, recv, pc, field, G1
+            self, public_keys, private_key, g, h, n, t, sc, my_id, send, recv, pc, field, G1
     ):  # (# noqa: E501)
         self.public_keys, self.private_key = public_keys, private_key
         self.n, self.t, self.my_id = n, t, my_id
-        self.g, self.h = gs[0], h 
+        self.g, self.h = g, h 
         self.sr = Serial(G1)
         self.sc = sc 
         self.poly_commit = pc

@@ -15,8 +15,8 @@ class MsgType:
 
 # Move the code for random double sharing to here
 class RANDOUSHA:
-    def __init__(self, gs, h, n, t, logq, my_id, send, recv, curve_params, matrices):
-        self.gs, self.h = gs, h
+    def __init__(self, g, h, n, t, logq, my_id, send, recv, curve_params, matrices):
+        self.g, self.h = g, h
         self.n, self.t, self.logq, self.my_id = (n, t, logq, my_id)
         self.q = 2**self.logq
         self.send, self.recv = send, recv
@@ -172,18 +172,18 @@ class RANDOUSHA:
         return t_share, t_random, shares, randoms, d_shares, d_randoms
 
     async def derive_key(self, shares, randoms, d_shares, d_randoms):
-        mt = self.gs[0]**self.t_share
+        mt = self.g**self.t_share
         mtr = self.h**self.t_random
-        gpok = PoK(self.gs[0], self.ZR, self.multiexp)
+        gpok = PoK(self.g, self.ZR, self.multiexp)
         hpok = PoK(self.h, self.ZR, self.multiexp)
         gpf = gpok.prove(self.t_share, mt)
         hpf = hpok.prove(self.t_random, mtr)
 
         # TODO: We will need to generate proof of knowledge for these values as well.
         # Can we possibly prove it in batch?
-        low_commits = [self.gs[0]**shares[ii] for ii in range(self.logq)]
+        low_commits = [self.g**shares[ii] for ii in range(self.logq)]
         low_r_commits = [self.h**randoms[ii] for ii in range(self.logq)]
-        high_commits = [self.gs[0]**d_shares[ii] for ii in range(self.logq)]
+        high_commits = [self.g**d_shares[ii] for ii in range(self.logq)]
         high_r_commits = [self.h**d_randoms[ii] for ii in range(self.logq)]
 
         low_pfs = [None]*self.logq
@@ -192,9 +192,9 @@ class RANDOUSHA:
         high_r_pfs = [None]*self.logq
         
         for ii in range(self.logq):
-            low_pfs[ii] = gpok.prove(shares[ii], self.gs[0]**shares[ii])
+            low_pfs[ii] = gpok.prove(shares[ii], self.g**shares[ii])
             low_r_pfs[ii] = hpok.prove(randoms[ii],self.h**randoms[ii])
-            high_pfs[ii] = gpok.prove(d_shares[ii], self.gs[0]**d_shares[ii])
+            high_pfs[ii] = gpok.prove(d_shares[ii], self.g**d_shares[ii])
             high_r_pfs[ii] = hpok.prove(d_randoms[ii], self.h**d_randoms[ii])
 
         all_commits = (low_commits, low_r_commits, high_commits, high_r_commits)

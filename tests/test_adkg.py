@@ -8,20 +8,20 @@ import numpy as np
 import math
 import uvloop
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-from pypairing import ZR, G1, blsmultiexp as multiexp, dotprod, blsfft
+from pypairing import ZR, G1, G2, blsmultiexp as multiexp, dotprod, blsfft
 # from pypairing import Curve25519ZR as ZR, Curve25519G as G1, curve25519multiexp as multiexp, curve25519dotprod as dotprod
     
 import time
 
-def get_avss_params(n, logq, G1):
-    # g, h = G1.rand(b'g'), G1.rand(b'h')
-    gs = [G1.rand(str(i).encode()) for i in range(logq)]
-    h = G1.rand(b'h')
+def get_avss_params(n, logq, G1, G2):
+    # g = [G1.rand(str(i).encode()) for i in range(logq)]
+    g, h = G1.rand(b'g'), G1.rand(b'h')
+    g2 = G2.rand(b'g')
     public_keys, private_keys = [None] * n, [None] * n
     for i in range(n):
         private_keys[i] = ZR.hash(str(i).encode())
-        public_keys[i] = gs[0]**private_keys[i]
-    return gs, h, public_keys, private_keys
+        public_keys[i] = g**private_keys[i]
+    return g, h, g2, public_keys, private_keys
 
 
 def gen_vector(t, n):
@@ -38,13 +38,13 @@ def gen_vector(t, n):
 @mark.asyncio
 async def test_adkg(test_router):
     t = 1
-    logq = 6
+    logq = 4
     q = 2**logq
     n = 3 * t + 1
     omega = get_omega(ZR, n)
-    gs, h, pks, sks = get_avss_params(n, logq, G1)
+    g, h, g2, pks, sks = get_avss_params(n, logq, G1, G2)
     sends, recvs, _ = test_router(n, maxdelay=0.01)
-    pc = PolyCommitHybrid(gs, h, ZR, multiexp)
+    pc = PolyCommitHybrid(g, h, ZR, multiexp)
     mat1, mat2 = gen_vector(t, n)
 
     dkg_tasks = [None] * n # async task for adkg
@@ -54,7 +54,7 @@ async def test_adkg(test_router):
     curve_params = (ZR, G1, multiexp, dotprod, blsfft)
 
     for i in range(n):
-        dkg = ADKG(pks, sks[i], gs, h, n, t, logq, i, omega, sends[i], recvs[i], pc, curve_params, (mat1, mat2))
+        dkg = ADKG(pks, sks[i], g, h, g2, n, t, logq, i, omega, sends[i], recvs[i], pc, curve_params, (mat1, mat2))
         dkg_list[i] = dkg
         dkg_tasks[i] = asyncio.create_task(dkg.run_adkg(start_time))
     
@@ -90,21 +90,21 @@ async def test_adkg(test_router):
         assert l_const == h_const
     
     msk = poly.interpolate_at(shares,0)
-    mpk = gs[0]**msk
+    mpk = g**msk
 
     # for i in range(n):
     #     pk, powers  = outputs[i][3], outputs[i][7]
     #     assert(mpk == pk)
     #     csk = msk
     #     for ii in range(logq):
-    #         assert powers[ii] == gs[0]**csk
+    #         assert powers[ii] == g**csk
     #         csk = csk*csk 
 
     for i in range(n):
         pk, powers = outputs[i][3], outputs[i][7] 
         assert(mpk == pk)
         for ii in range(q):
-            assert powers[ii] == gs[0]**(msk**ii)
+            assert powers[ii] == g**(msk**ii)
 
     csk = msk
     for ii in range(logq):
@@ -117,7 +117,7 @@ async def test_adkg(test_router):
         csk = msk
         for ii in range(logq):
             # pt_power = interpolate_g1_at_x(pt_commits[ii], 0, G1, ZR)
-            assert pt_commits[ii][0] == gs[0]**csk
+            assert pt_commits[ii][0] == g**csk
             csk = csk*csk 
 
     mks_set = outputs[0][1]

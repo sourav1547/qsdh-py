@@ -2799,6 +2799,20 @@ fn blsmultiexp(gs: &PyList, zrs: &PyList) -> PyResult<PyG1>{
 }
 
 #[pyfunction]
+fn blsmultiexp2(gs: &PyList, zrs: &PyList) -> PyResult<PyG2>{
+    let mut output = PyG2{ g2: G2::zero(), pp: Vec::new(), pplevel:0 };
+    for (ai, bi) in gs.iter().zip(zrs){
+        //let aif: &PyFr = ai.try_into().unwrap();
+        //let bif: &PyFr = bi.try_into().unwrap();
+        let aicel: &PyCell<PyG2> = ai.downcast()?;
+        let aif: &PyG2 = &aicel.borrow();
+        let temp = aif.pow(bi)?;
+        output.add_assign(&temp);
+    }
+    Ok(output)
+}
+
+#[pyfunction]
 fn blsfft(gs: &PyList, omega: &PyAny, n: usize) -> PyResult<Vec<PyG1>>{
     let mut gs_vec : Vec<PyG1> = Vec::new();
     for gi in gs.iter() {
@@ -3297,6 +3311,7 @@ fn pypairing(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(dotprod))?;
     m.add_wrapped(wrap_pyfunction!(condense_list))?;
     m.add_wrapped(wrap_pyfunction!(blsmultiexp))?;
+    m.add_wrapped(wrap_pyfunction!(blsmultiexp2))?;
     m.add_wrapped(wrap_pyfunction!(blsfft))?;
 
     m.add_wrapped(wrap_pyfunction!(hashcurve25519zrs))?;

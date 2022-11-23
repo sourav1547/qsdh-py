@@ -4,6 +4,7 @@ from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
 from adkg.utils.poly_misc import interpolate_g1_at_x
 from adkg.extra_proofs import CP
+from pypairing import blsmultiexp2, pair, G2
 
 
 import logging
@@ -19,14 +20,15 @@ class APMsgType:
 class ALL_POWERS:
     #@profile
     def __init__(
-            self, g, h, n, t, logq, my_id, omega, send, recv, curve_params
+            self, g, g2, n, t, logq, my_id, omega, send, recv, curve_params
     ):  # (# noqa: E501)
         self.n, self.t, self.logq, self.my_id = n, t, logq, my_id
-        self.g, self.h = g, h
+        self.g, self.g2 = g, g2
         self.omega, self.omegainv = omega, omega**(-1)
         self.ZR, self.G1, self.multiexp, self.dotprod, self.blsfft = curve_params
         self.sr = Serial(self.G1)
         self.ninv = self.ZR(n)**(-1)
+        self.rands = [self.ZR.rand() for _ in range(2**self.logq)]
 
         self.benchmark_logger = logging.LoggerAdapter(
             logging.getLogger("benchmark_logger"), {"node_id": self.my_id}
@@ -117,8 +119,13 @@ class ALL_POWERS:
                 return False
         return True
     
-    def verify_eval(self, sender, s_idx, s_msg):
-        return True
+    def verify_eval(self, sender, idx, powers):
+        ell = len(powers)
+        rands = self.rands[:ell]
+        l_powers = [self.evals[i][sender] for i in range(ell)]
+        g1rlc = self.multiexp(powers, rands)
+        l_g1rlc = self.multiexp(l_powers, rands)
+        return pair(g1rlc, self.g2) == pair(l_g1rlc, self.g2powers[idx])
 
     def verify_msgs(self, type, s_idx):
         logger.info("[%d] Processing old all powers", self.my_id)
@@ -138,14 +145,14 @@ class ALL_POWERS:
         return v_mgs
 
     #@profile
-    async def powers(self, t_shares, t_commits, t_powers):
+    async def powers(self, t_shares, t_commits, t_powers, g2powers):
         """
         Generating all powers protocol
         """
         aptag = f"AP"                    
         send, recv = self.get_send(aptag), self.subscribe_recv(aptag)
         logger.debug("[%d] Starting all powers phase", self.my_id)
-        self.t_shares, self.t_commits, self.t_powers = t_shares, t_commits, t_powers
+        self.t_shares, self.t_commits, self.t_powers, self.g2powers = t_shares, t_commits, t_powers, g2powers
 
         self.msg_buff = [{APMsgType.SHARE:{}, APMsgType.EVAL:{}} for _ in range(self.logq)]
         cur_powers = [self.g]
