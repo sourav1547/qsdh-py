@@ -78,6 +78,6 @@
     },
 
     "docker": {
-        "image_path": "sourav1547/htadkg:latest"
+        "image_path": "sourav1547/qsdh:latest"
     }
 }

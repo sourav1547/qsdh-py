@@ -2,8 +2,8 @@ from adkg.config import HbmpcConfig
 from adkg.ipc import ProcessProgramRunner
 from adkg.adkg import ADKG
 from adkg.poly_commit_hybrid import PolyCommitHybrid
-# from pypairing import ZR, G1, blsmultiexp as multiexp, dotprod
-from pypairing import Curve25519ZR as ZR, Curve25519G as G1, curve25519multiexp as multiexp, curve25519dotprod as dotprod
+from adkg.utils.poly_misc import get_omega
+from pypairing import ZR, G1, G2, blsmultiexp as multiexp, dotprod, blsfft
 import asyncio
 import time
 import logging
@@ -15,15 +15,17 @@ logger.setLevel(logging.ERROR)
 # Uncomment this when you want logs from this file.
 logger.setLevel(logging.NOTSET)
 
-def get_avss_params(n, G1):
-    g, h = G1.hash(b'g'), G1.hash(b'h') 
+def get_avss_params(n, G1, G2):
+    g, h = G1.rand(b'g'), G1.rand(b'h')
+    g2 = G2.rand(b'g')
     public_keys, private_keys = [None] * n, [None] * n
     for i in range(n):
         private_keys[i] = ZR.hash(str(i).encode())
-        public_keys[i] = pow(g, private_keys[i])
-    return g, h, public_keys, private_keys
+        public_keys[i] = g**private_keys[i]
+    return g, h, g2, public_keys, private_keys
 
-def gen_vector(t, deg, n):
+def gen_vector(t, n):
+    deg = 2*t
     coeff_1 = np.array([[ZR(i+1)**j for j in range(t+1)] for i in range(n)])
     coeff_2 = np.array([[ZR(i+1)**j for j in range(t+1, deg+1)] for i in range(n)])
     hm_1 = np.array([[ZR(i+1)**j for j in range(n)] for i in range(t+1)])
@@ -34,20 +36,21 @@ def gen_vector(t, deg, n):
     return (rm_1.tolist(), rm_2.tolist())
 
 async def _run(peers, n, t, k, my_id, start_time):
-    g, h, pks, sks = get_avss_params(n, G1)
+    g, h, g2, pks, sks = get_avss_params(n, G1, G2)
     pc = PolyCommitHybrid(g, h, ZR, multiexp)
-    deg = k
-    mat1, mat2 = gen_vector(t, deg, n)
+    logq = k
+    omega = get_omega(ZR, n)
+    mat1, mat2 = gen_vector(t, n)
+    curve_params = (ZR, G1, multiexp, dotprod, blsfft)
+
     async with ProcessProgramRunner(peers, n, t, my_id) as runner:
         send, recv = runner.get_send_recv("")
         logging.debug(f"Starting ADKG: {(my_id)}")
         logging.debug(f"Start time: {(start_time)}, diff {(start_time-int(time.time()))}")
-
         benchmark_logger = logging.LoggerAdapter(
            logging.getLogger("benchmark_logger"), {"node_id": my_id}
         )
-        curve_params = (ZR, G1, multiexp, dotprod)
-        with ADKG(pks, sks[my_id], g, h, n, t, deg, my_id, send, recv, pc, curve_params, (mat1, mat2)) as adkg:
+        with ADKG(pks, sks[my_id], g, h, g2, n, t, logq, my_id, omega, send, recv, pc, curve_params, (mat1, mat2)) as adkg:
             while True:
                 if time.time() > start_time:
                     break

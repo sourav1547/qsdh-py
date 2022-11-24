@@ -8,6 +8,7 @@ from adkg.acss_ht import ACSS_HT
 from adkg.squaring import SQUARE
 from adkg.all_powers import ALL_POWERS
 from adkg.randousha import RANDOUSHA
+from adkg.g2_powers import G2_POWERS
 
 from adkg.broadcast.tylerba import tylerba
 from adkg.broadcast.optqrbc import optqrbc
@@ -23,6 +24,7 @@ class ADKGMsgType:
     SQ = "S"
     AP = "X"
     RDS = "D"
+    G = "G"
     
 class ADKG:
     def __init__(self, public_keys, private_key, g, h, g2, n, t, logq, my_id, omega, send, recv, pc, curve_params, matrices):
@@ -64,6 +66,7 @@ class ADKG:
             self.acss_task.cancel()
             self.rds_task.cancel()
             self.sq_task.cancel()
+            self.gp_task.cancel()
             self.ap_task.cancel()
         except Exception:
             logging.info("ADKG task finished")
@@ -286,11 +289,24 @@ class ADKG:
     async def squaring(self, t_share, t_pk, t_commits, params):
         sqtag = ADKGMsgType.SQ
         sqsend, sqrecv = self.get_send(sqtag), self.subscribe_recv(sqtag)
-        self.sq = SQUARE(self.g, self.g2, self.n, self.t, self.logq, self.my_id, sqsend, sqrecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
+        self.sq = SQUARE(self.g, self.n, self.t, self.logq, self.my_id, sqsend, sqrecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
         self.sq_task = asyncio.create_task(self.sq.square(t_share, t_pk, t_commits, params))
+        self.benchmark_logger.info(f"Squaring task created")
         # powers-of-two shares, powers-of-two commits, and already computed powers
-        pt_shares, pt_commits, powers, g2powers  = await self.sq.output_queue.get()
-        return (pt_shares, pt_commits, powers, g2powers)
+        pt_shares, pt_commits, powers  = await self.sq.output_queue.get()
+        self.benchmark_logger.info(f"Squaring task finished")
+        return (pt_shares, pt_commits, powers)
+
+    
+    async def g2_powers(self, t_shares, t_commits):
+        gtag = ADKGMsgType.G
+        gsend, grecv = self.get_send(gtag), self.subscribe_recv(gtag)
+        self.gp = G2_POWERS(self.g, self.g2, self.n, self.t, self.logq, self.my_id, gsend, grecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
+        self.gp_task = asyncio.create_task(self.gp.powers(t_shares, t_commits))
+        self.benchmark_logger.info(f"G2 task created")
+        g2powers  = await self.gp.output_queue.get()
+        self.benchmark_logger.info(f"G2 task finished")
+        return g2powers
     
     async def all_powers(self, t_shares, t_commits, t_powers, g2powers):
         aptag = ADKGMsgType.AP
@@ -304,7 +320,6 @@ class ADKG:
         logging.info(f"Run ADKG called")
         acss_outputs = {}
         acss_signal = asyncio.Event()
-
         acss_start_time = time.time()
         values =[self.ZR.rand() for _ in range(self.sc)]
         self.acss_task = asyncio.create_task(self.acss_step(acss_outputs, values, acss_signal))
@@ -312,21 +327,32 @@ class ADKG:
         acss_signal.clear()
         acss_time = time.time() - acss_start_time
         self.benchmark_logger.info(f"ACSS time: {(acss_time)}")
+
         key_proposal = list(acss_outputs.keys())
         create_acs_task = asyncio.create_task(self.agreement(key_proposal, acss_outputs, acss_signal))
         acs, key_task, work_tasks = await create_acs_task
         await acs
         output = await key_task
         await asyncio.gather(*work_tasks)
+        setup_time = time.time() - acss_start_time
+        self.benchmark_logger.info(f"Setup time: {(setup_time)}")
+
         mks, t_share, t_pk, pks, shares, d_shares, low_f_commits, high_f_commits = output
         params = (shares, d_shares, low_f_commits, high_f_commits)
         sq_task = asyncio.create_task(self.squaring(t_share, t_pk, pks, params))
-        pt_shares, pt_commits, t_powers, g2powers = await sq_task
+        pt_shares, pt_commits, t_powers = await sq_task
+        squaring_time = time.time() - acss_start_time
+        self.benchmark_logger.info(f"Squaring time: {(squaring_time)}")
+
+        g2_task = asyncio.create_task(self.g2_powers(pt_shares, pt_commits))
+        g2powers = await g2_task
+        g2_time = time.time() - acss_start_time
+        self.benchmark_logger.info(f"G2 time: {(g2_time)}")
+
         ap_task = asyncio.create_task(self.all_powers(pt_shares, pt_commits, t_powers, g2powers))
         powers = await ap_task
-        # create_qsdh_task = asyncio.create_task(self.qsdh(output))
-        # params = await create_qsdh_task
-        # qsdh_time = time.time()-start_time
-        # logging.info("ADKG time 2: %f", qsdh_time)
-        # self.benchmark_logger.info("ADKG time: %f", qsdh_time)
+        all_powers_time = time.time() - acss_start_time
+        self.benchmark_logger.info(f"All powers time: {(all_powers_time)}")
+
         self.output_queue.put_nowait((values[1], mks, t_share, t_pk, params, pt_shares, pt_commits, powers))
+        return 

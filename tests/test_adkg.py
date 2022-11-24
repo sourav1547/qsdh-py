@@ -5,7 +5,6 @@ from adkg.utils.poly_misc import get_omega
 from adkg.adkg import ADKG
 import asyncio
 import numpy as np
-import math
 import uvloop
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 from pypairing import ZR, G1, G2, blsmultiexp as multiexp, dotprod, blsfft
@@ -13,7 +12,7 @@ from pypairing import ZR, G1, G2, blsmultiexp as multiexp, dotprod, blsfft
     
 import time
 
-def get_avss_params(n, logq, G1, G2):
+def get_avss_params(n, G1, G2):
     # g = [G1.rand(str(i).encode()) for i in range(logq)]
     g, h = G1.rand(b'g'), G1.rand(b'h')
     g2 = G2.rand(b'g')
@@ -38,12 +37,11 @@ def gen_vector(t, n):
 @mark.asyncio
 async def test_adkg(test_router):
     t = 2
-    logq = 6
-    q = 2**logq
+    logq = 5
     n = 3*t+1
     n = 8
     omega = get_omega(ZR, n)
-    g, h, g2, pks, sks = get_avss_params(n, logq, G1, G2)
+    g, h, g2, pks, sks = get_avss_params(n, G1, G2)
     sends, recvs, _ = test_router(n, maxdelay=0.01)
     pc = PolyCommitHybrid(g, h, ZR, multiexp)
     mat1, mat2 = gen_vector(t, n)
@@ -104,7 +102,7 @@ async def test_adkg(test_router):
     for i in range(n):
         pk, powers = outputs[i][3], outputs[i][7] 
         assert(mpk == pk)
-        for ii in range(q):
+        for ii in range(2**logq):
             assert powers[ii] == g**(msk**ii)
 
     csk = msk

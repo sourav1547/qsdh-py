@@ -3,8 +3,6 @@ from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
 from adkg.extra_proofs import CP
-from pypairing import blsmultiexp2, pair, G2
-from adkg.utils.poly_misc import interpolate_g1_at_x
 
 
 import logging
@@ -14,15 +12,14 @@ logger.setLevel(logging.ERROR)
 # Uncomment this when you want logs from this file.
 # logger.setLevel(logging.DEBUG)
 
-
 class SQUARE:
     #@profile
     def __init__(
-            self, g, g2, n, t, logq, my_id, send, recv, curve_params
+            self, g, n, t, logq, my_id, send, recv, curve_params
     ):  # (# noqa: E501)
         self.n, self.t, self.logq, self.my_id = n, t, logq, my_id
         self.q = 2**self.logq
-        self.g, self.g2 = g, g2
+        self.g = g
         self.ZR, self.G1, self.multiexp, self.dotprod = curve_params
         self.sr = Serial(self.G1)
 
@@ -81,7 +78,7 @@ class SQUARE:
         """
         sqtag = f"SQ"                    
         send, recv = self.get_send(sqtag), self.subscribe_recv(sqtag)
-        logger.debug("[%d] Starting squaring phase", self.my_id)
+        logger.info("[%d] Starting squaring phase", self.my_id)
         self.out_shares = {0: t_share}
         self.powers = {0: t_pk}
         self.th_powers = {0:tpks}
@@ -90,6 +87,7 @@ class SQUARE:
         msg_buff = [[] for _ in range(self.logq)]
         cur_share = t_share
         for idx in range(1, self.logq+1):
+            self.benchmark_logger.info(f"For loop: {idx}")
             # Computing the reveal message
             self.inc_idx = False
             cur_share_sq = cur_share*cur_share
@@ -111,6 +109,7 @@ class SQUARE:
                     sq_shares.append([sender+1, s_reveal])
                     if len(sq_shares) > 2*self.t:
                         cur_share = self.process(idx, sq_shares)
+                        self.benchmark_logger.info(f"Share computed: {idx}")  
                         break
             
             if self.inc_idx:
@@ -128,38 +127,10 @@ class SQUARE:
                     elif self.verify_sq(idx, sender, s_reveal, s_y, s_pf):
                         sq_shares.append([sender+1, s_reveal])
                         if len(sq_shares) > 2*self.t:
-                            cur_share = self.process(idx, sq_shares)                        
+                            cur_share = self.process(idx, sq_shares)
+                            self.benchmark_logger.info(f"Share: {idx}")
                             break
-
-        g2tag = f"G"                    
-        send, recv = self.get_send(g2tag), self.subscribe_recv(g2tag)
-        rands = [self.ZR.rand() for _ in range(self.logq+1)]
-        g2powers = [G2.identity()]*self.logq
-
-        g2_th_powers = [self.g2**self.out_shares[i] for i in range(self.logq+1)]
-        for i in range(self.n):
-            send(i, g2_th_powers)
-        
-        g2_temps = [[] for _ in range(self.logq)]
-        while True:
-            (sender, s_powers) = await recv()
-            if sender == self.my_id:
-                for i in range(self.logq):
-                    g2_temps[i].append([sender+1, s_powers[i]])
-                continue
-
-            g1_pows = [self.th_powers[i][sender+1] for i in range(self.logq+1)]
-            g1_rlc = self.multiexp(g1_pows, rands) 
-            g2_rlc = blsmultiexp2(s_powers, rands)
-            if pair(g1_rlc, self.g2) == pair(self.g, g2_rlc):
-                for i in range(self.logq):
-                    g2_temps[i].append([sender+1, s_powers[i]])
-
-                if len(g2_temps[0]) > self.t:
-                    for i in range(self.logq):
-                        g2powers[i] = interpolate_g1_at_x(g2_temps[i], 0, G2, self.ZR)
-                    break
-
-        self.output_queue.put_nowait((self.out_shares, self.th_powers, self.powers, g2powers))
+                                
+        self.output_queue.put_nowait((self.out_shares, self.th_powers, self.powers))
         return
         
