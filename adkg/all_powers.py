@@ -5,6 +5,7 @@ from adkg.utils.serilization import Serial
 from adkg.utils.poly_misc import interpolate_g1_at_x, prep_for_fft
 from adkg.extra_proofs import CP
 from pypairing import pair
+import time
 
 
 import logging
@@ -53,6 +54,7 @@ class ALL_POWERS:
         self.subscribe_recv_task.cancel()
 
     def batch_mul_shares(self, cur_share, cur_powers):
+        start = time.time()
         m = len(cur_powers)
         padding = 0 + (m%(self.deg) != 0)
         ell = m//(self.deg) + padding
@@ -67,14 +69,20 @@ class ALL_POWERS:
         self.evals = [self.blsfft(polys[i], self.omega, self.n) for i in range(ell)] 
         out_evals = [[self.evals[i][node]**cur_share for i in range(ell)] for node in range(self.n)]
 
-        proofs = [[None]*ell for _ in range(self.n)]
+        # proofs = [[None]*ell for _ in range(self.n)]
+        chals = [[None]*ell for _ in range(self.n)]
+        resps = [[None]*ell for _ in range(self.n)]
         x = self.g**cur_share
         for i in range(ell):
             for node in range(self.n):
                 h = self.evals[i][node]
                 cp = CP(self.g, h, self.ZR, self.multiexp)
-                proofs[node][i] = cp.prove(cur_share, x, out_evals[node][i])
-        return (out_evals, proofs)
+                chal, res = cp.prove(cur_share, x, out_evals[node][i])
+                chals[node][i] = chal
+                resps[node][i] = res
+        time_taken = time.time() - start
+        self.benchmark_logger.info(f"SHARE gen, ell:{ell}, time:{time_taken}")
+        return (out_evals, chals, resps)
     
     def gen_eval_shares(self, idx, all_shares):
         m = 2**idx
@@ -89,6 +97,7 @@ class ALL_POWERS:
         
 
     def gen_next_powers(self, idx, all_evals):
+        start = time.time()
         m = 2**idx
         padding  = 0 + (m%(self.deg) != 0)
         ell = m//(self.deg) + padding
@@ -106,10 +115,11 @@ class ALL_POWERS:
             else:
                 fft_inv = self.blsfft(coords, self.omegainv, self.n)
                 outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
+        time_taken = time.time() - start
+        self.benchmark_logger.info(f"Next message gen, ell:{ell}, time:{time_taken}")
         return outputs
 
-    def verify_share(self, sender, s_idx, s_msg):
-        powers, pfs = s_msg
+    def verify_share(self, sender, s_idx, powers, pfs):
         ell = len(powers)
         x = self.t_commits[s_idx][sender+1]
         for i in range(ell):
@@ -133,25 +143,43 @@ class ALL_POWERS:
         msgs = self.msg_buff[s_idx][type]
         if type == APMsgType.SHARE:
             for sender, s_msg in msgs.items():
-                if self.verify_share(sender, s_idx, s_msg):
-                    powers, _ = s_msg # second coodinates are proofs
+                powers, pfs = self.decode(s_msg)
+                if self.verify_share(sender, s_idx, powers, pfs):
                     v_msgs[sender] = powers
                 if len(v_msgs) == self.t+1:
                     break
         elif type == APMsgType.EVAL:
             for sender, s_msg in msgs.items():
-                if self.verify_eval(sender, s_idx, s_msg):
-                    v_msgs[sender] = s_msg
+                s_powers = self.decode(s_msg)
+                if self.verify_eval(sender, s_idx, s_powers):
+                    v_msgs[sender] = s_powers
                 if len(v_msgs) == self.deg:
                     break
         return v_msgs
+    
+    def encode(self, msgs, chal, res):
+        datab = self.sr.serialize_gs(msgs)
+        datab.extend(self.sr.serialize_fs(chal))
+        datab.extend(self.sr.serialize_fs(res))
+        return datab
+    
+    def decode(self, data):
+        g_size = 48
+        f_size = 32
+        data = bytes(data)
+        ell = len(data)//(g_size+2*f_size)
+        shares = self.sr.deserialize_gs(data[:ell*g_size])
+        chals = self.sr.deserialize_fs(data[ell*g_size:ell*(g_size+f_size)])
+        reps = self.sr.deserialize_fs(data[ell*(g_size+f_size):])
+        return shares, list(zip(chals, reps))
 
     #@profile
     async def powers(self, t_shares, t_commits, t_powers, g2powers):
         """
         Generating all powers protocol
         """
-        aptag = f"AP"                    
+        aptag = f"AP"        
+        self.start_time  = time.time()          
         send, recv = self.get_send(aptag), self.subscribe_recv(aptag)
         logger.debug("[%d] Starting all powers phase", self.my_id)
         self.t_shares, self.t_commits, self.t_powers, self.g2powers = t_shares, t_commits, t_powers, g2powers
@@ -160,16 +188,19 @@ class ALL_POWERS:
         self.msg_buff = [{APMsgType.SHARE:{}, APMsgType.EVAL:{}} for _ in range(self.logq)]
         cur_powers = [self.g]
 
-        
         for idx in range(self.logq):
+            elapsed_time = time.time() - self.start_time
+            self.benchmark_logger.info(f"AP start index:{idx}, elapsed time {(elapsed_time)}")
             cur_share = self.t_shares[idx]
-            share_msgs, share_pfs = self.batch_mul_shares(cur_share, cur_powers)
+            share_msgs, share_chals, share_resps = self.batch_mul_shares(cur_share, cur_powers)
             for node in range(self.n):
-                send(node, (APMsgType.SHARE, idx, (share_msgs[node], share_pfs[node])))
+                datab = self.encode(share_msgs[node], share_chals[node], share_resps[node])
+                send(node, (APMsgType.SHARE, idx, datab))
 
             temp_shares = self.verify_msgs(APMsgType.SHARE, idx)
             if len(temp_shares) > self.t:
-                eval_msg = self.gen_eval_shares(idx, temp_shares)
+                eval_powers = self.gen_eval_shares(idx, temp_shares)
+                eval_msg = self.sr.serialize_gs(eval_powers)
                 for i in range(self.n):
                     send(i, (APMsgType.EVAL, idx, eval_msg))
             temp_evals = self.verify_msgs(APMsgType.EVAL, idx)
@@ -184,18 +215,20 @@ class ALL_POWERS:
                 elif s_idx == idx:
                     # Only makes sense to process if have not processed already
                     if s_type == APMsgType.SHARE and len(temp_shares) <= self.t:    
-                        if self.verify_share(sender, s_idx, s_msg):
-                            powers, _ = s_msg # second coodinates are proofs
+                        powers, pfs = self.decode(s_msg)
+                        if self.verify_share(sender, s_idx, powers, pfs):
                             temp_shares[sender] = powers
                         if len(temp_shares) == self.t+1:
-                            eval_msg = self.gen_eval_shares(idx, temp_shares)
+                            eval_powers = self.gen_eval_shares(idx, temp_shares)
+                            eval_msg = self.sr.serialize_gs(eval_powers)
                             for i in range(self.n):
                                 send(i, (APMsgType.EVAL, idx, eval_msg))
                     
                     elif s_type == APMsgType.EVAL:
-                        if self.verify_eval(sender, s_idx, s_msg):
-                            temp_evals[sender] = s_msg
-                        if len(temp_evals) >= self.deg:
+                        s_powers = self.sr.deserialize_gs(bytes(s_msg))
+                        if self.verify_eval(sender, s_idx, s_powers):
+                            temp_evals[sender] = s_powers
+                        if len(temp_evals) >= self.n:
                             next_powers = self.gen_next_powers(idx, temp_evals)
                             # Updating cur_powers as [cur_powers, next_powers]
                             cur_powers = cur_powers + next_powers

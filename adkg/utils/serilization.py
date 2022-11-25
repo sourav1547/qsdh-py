@@ -33,15 +33,6 @@ class Serial:
             gs[i] = g
         return gs
 
-    def deserialize_g2s(self, data):
-        n = len(data)//self.g_size
-        gs = [None for _ in range(n)]
-        for i in range(n):            
-            g = self.G()
-            g.__setstate__(bytes(data[i*self.g_size:(i+1)*self.g_size]))
-            gs[i] = g
-        return gs
-
     def serialize_gs(self, g_list):    
         n = len(g_list)
         data = bytearray()

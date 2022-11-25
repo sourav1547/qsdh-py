@@ -64,7 +64,7 @@ class G2_POWERS:
 
         while True:
             sender, s_msg = await recv()
-            s_powers = self.sr.deserialize_g2s(s_msg)
+            s_powers = self.sr.deserialize_gs(bytes(s_msg))
             
             if sender == self.my_id:
                 for i in range(self.logq+1):
