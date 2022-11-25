@@ -129,21 +129,22 @@ class ALL_POWERS:
         return pair(g1rlc, self.g2) == pair(l_g1rlc, self.g2powers[idx])
 
     def verify_msgs(self, type, s_idx):
-        logger.info("[%d] Processing old all powers", self.my_id)
-        v_mgs = {}
+        v_msgs = {}
         msgs = self.msg_buff[s_idx][type]
         if type == APMsgType.SHARE:
-            for sender, s_msg in msgs:
+            for sender, s_msg in msgs.items():
                 if self.verify_share(sender, s_idx, s_msg):
                     powers, _ = s_msg # second coodinates are proofs
-                    v_mgs[sender] = powers
+                    v_msgs[sender] = powers
+                if len(v_msgs) == self.t+1:
+                    break
         elif type == APMsgType.EVAL:
-            for sender, s_msg in msgs:
+            for sender, s_msg in msgs.items():
                 if self.verify_eval(sender, s_idx, s_msg):
-                    powers, _ = s_msg # second coodinates are proofs
-                    v_mgs[sender] = powers
-        logger.info("[%d] Finished processing old all powers", self.my_id)
-        return v_mgs
+                    v_msgs[sender] = s_msg
+                if len(v_msgs) == self.deg:
+                    break
+        return v_msgs
 
     #@profile
     async def powers(self, t_shares, t_commits, t_powers, g2powers):
@@ -167,19 +168,19 @@ class ALL_POWERS:
                 send(node, (APMsgType.SHARE, idx, (share_msgs[node], share_pfs[node])))
 
             temp_shares = self.verify_msgs(APMsgType.SHARE, idx)
-            if len(temp_shares) == self.deg:
+            if len(temp_shares) > self.t:
                 eval_msg = self.gen_eval_shares(idx, temp_shares)
                 for i in range(self.n):
                     send(i, (APMsgType.EVAL, idx, eval_msg))
-            temp_evals = self.verify_msgs(APMsgType.SHARE, idx)
+            temp_evals = self.verify_msgs(APMsgType.EVAL, idx)
             
             while True:
-                (sender, msg) = await recv()
+                sender, msg = await recv()
                 s_type, s_idx, s_msg = msg
                 
                 # Buffering future messages
                 if s_idx > idx:
-                    self.msg_buff[s_type][sender] = msg
+                    self.msg_buff[s_idx][s_type][sender] = msg
                 elif s_idx == idx:
                     # Only makes sense to process if have not processed already
                     if s_type == APMsgType.SHARE and len(temp_shares) <= self.t:    
@@ -194,11 +195,10 @@ class ALL_POWERS:
                     elif s_type == APMsgType.EVAL:
                         if self.verify_eval(sender, s_idx, s_msg):
                             temp_evals[sender] = s_msg
-                        if len(temp_evals) == self.deg:
+                        if len(temp_evals) >= self.deg:
                             next_powers = self.gen_next_powers(idx, temp_evals)
                             # Updating cur_powers as [cur_powers, next_powers]
                             cur_powers = cur_powers + next_powers
                             break
 
-        self.output_queue.put_nowait(cur_powers)
-        return
+        return cur_powers

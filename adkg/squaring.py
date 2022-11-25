@@ -87,7 +87,6 @@ class SQUARE:
         msg_buff = [[] for _ in range(self.logq)]
         cur_share = t_share
         for idx in range(1, self.logq+1):
-            self.benchmark_logger.info(f"For loop: {idx}")
             # Computing the reveal message
             self.inc_idx = False
             cur_share_sq = cur_share*cur_share
@@ -109,7 +108,6 @@ class SQUARE:
                     sq_shares.append([sender+1, s_reveal])
                     if len(sq_shares) > 2*self.t:
                         cur_share = self.process(idx, sq_shares)
-                        self.benchmark_logger.info(f"Share computed: {idx}")  
                         break
             
             if self.inc_idx:
@@ -120,7 +118,7 @@ class SQUARE:
                 s_idx, s_reveal, s_y, s_pf = msg
 
                 if s_idx > idx:
-                    msg_buff[s_idx].append((sender, s_reveal, s_y, s_pf))
+                    msg_buff[s_idx-1].append((sender, s_reveal, s_y, s_pf))
                 elif (s_idx == idx):
                     if sender == self.my_id:
                         sq_shares.append([sender+1, s_reveal])
@@ -128,9 +126,11 @@ class SQUARE:
                         sq_shares.append([sender+1, s_reveal])
                         if len(sq_shares) > 2*self.t:
                             cur_share = self.process(idx, sq_shares)
-                            self.benchmark_logger.info(f"Share: {idx}")
                             break
-                                
-        self.output_queue.put_nowait((self.out_shares, self.th_powers, self.powers))
-        return
+
+        assert len(self.out_shares) == self.logq+1
+        assert len(self.th_powers) == self.logq+1
+        assert len(self.powers ) == self.logq+1
+        
+        return (self.out_shares, self.th_powers, self.powers)
         

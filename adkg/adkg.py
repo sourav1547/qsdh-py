@@ -61,13 +61,8 @@ class ADKG:
                 task.cancel()
             self.acss.kill()
             self.rds.kill()
-            self.sq.kill()
-            self.ap.kill()
             self.acss_task.cancel()
             self.rds_task.cancel()
-            self.sq_task.cancel()
-            self.gp_task.cancel()
-            self.ap_task.cancel()
         except Exception:
             logging.info("ADKG task finished")
         
@@ -291,10 +286,8 @@ class ADKG:
         sqsend, sqrecv = self.get_send(sqtag), self.subscribe_recv(sqtag)
         self.sq = SQUARE(self.g, self.n, self.t, self.logq, self.my_id, sqsend, sqrecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
         self.sq_task = asyncio.create_task(self.sq.square(t_share, t_pk, t_commits, params))
-        self.benchmark_logger.info(f"Squaring task created")
         # powers-of-two shares, powers-of-two commits, and already computed powers
-        pt_shares, pt_commits, powers  = await self.sq.output_queue.get()
-        self.benchmark_logger.info(f"Squaring task finished")
+        pt_shares, pt_commits, powers  = await self.sq_task
         return (pt_shares, pt_commits, powers)
 
     
@@ -303,9 +296,7 @@ class ADKG:
         gsend, grecv = self.get_send(gtag), self.subscribe_recv(gtag)
         self.gp = G2_POWERS(self.g, self.g2, self.n, self.t, self.logq, self.my_id, gsend, grecv, (self.ZR, self.G1, self.multiexp, self.dotprod))
         self.gp_task = asyncio.create_task(self.gp.powers(t_shares, t_commits))
-        self.benchmark_logger.info(f"G2 task created")
-        g2powers  = await self.gp.output_queue.get()
-        self.benchmark_logger.info(f"G2 task finished")
+        g2powers  = await self.gp_task
         return g2powers
     
     async def all_powers(self, t_shares, t_commits, t_powers, g2powers):
@@ -313,7 +304,7 @@ class ADKG:
         apsend, aprecv = self.get_send(aptag), self.subscribe_recv(aptag)
         self.ap = ALL_POWERS(self.g, self.g2, self.n, self.t, self.logq, self.my_id, self.omega, apsend, aprecv, self.curve_params)
         self.ap_task = asyncio.create_task(self.ap.powers(t_shares, t_commits, t_powers, g2powers))
-        powers  = await self.ap.output_queue.get()
+        powers  = await self.ap_task
         return powers
         
     async def run_adkg(self, start_time):

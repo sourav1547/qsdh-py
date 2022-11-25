@@ -1,3 +1,5 @@
+
+
 // `clippy` is a code linting tool for improving code quality by catching
 // common mistakes or strange code patterns. If the `cargo-clippy` feature
 // is provided, all compiler warnings are prohibited.
@@ -53,7 +55,7 @@ use log::debug;
 pub mod tests;
 
 pub mod bls12_381;
-use bls12_381::{G1, G1Affine, G1Compressed, G2, Fr, Fq, Fq2, Fq6, Fq12, FqRepr, FrRepr};
+use bls12_381::{G1, G1Affine, G1Compressed, G2, G2Compressed,  Fr, Fq, Fq2, Fq6, Fq12, FqRepr, FrRepr};
 use group::CurveProjective;
 use group::CurveAffine;
 use group::EncodedPoint;
@@ -895,6 +897,29 @@ impl PyG2 {
         let aff = self.g2.into_affine();
         Ok(format!("({}, {})",aff.x, aff.y))
         //Ok(format!("({}, {})",self.g2.into_affine().x, self.g2.into_affine().y))
+    }
+
+    //Serialize into affine coordinates so that equal points serialize the same
+    pub fn __getstate__<'p>(&self, py: Python<'p>) -> PyResult<&'p PyBytes> {
+        let aff = self.g2.into_affine();
+        let compressed = aff.into_compressed();
+        Ok(PyBytes::new(py, compressed.as_ref()))
+    }
+    
+    // FIXME: This does not return the correct output.
+    pub fn __setstate__(&mut self, list: &PyAny) -> PyResult<()>
+    {
+        //let arr: [u64; 13] = list.extract()?;
+        let u8arr: &[u8] = list.extract()?;
+        let bytes: [u8;96] = u8arr.try_into().expect("invalid initialization");
+        let compressed = G2Compressed(bytes);
+        let aff = compressed.into_affine().unwrap();
+        self.g2 = aff.into_projective();
+        if self.pplevel != 0 {
+            self.pp = Vec::new();
+            self.pplevel = 0;
+        }
+        Ok(())
     }
     
     fn preprocess(&mut self, level: usize) -> PyResult<()> {

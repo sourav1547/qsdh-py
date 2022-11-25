@@ -39,7 +39,7 @@ async def _run(peers, n, t, k, my_id, start_time):
     g, h, g2, pks, sks = get_avss_params(n, G1, G2)
     pc = PolyCommitHybrid(g, h, ZR, multiexp)
     logq = k
-    omega = get_omega(ZR, n)
+    omega = get_omega(ZR, n, 1729)
     mat1, mat2 = gen_vector(t, n)
     curve_params = (ZR, G1, multiexp, dotprod, blsfft)
 

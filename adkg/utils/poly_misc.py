@@ -9,10 +9,10 @@ def get_omega(field, n, seed=None):
     This only makes sense if n is a power of 2!
     """
     assert n & n - 1 == 0, "n must be a power of 2"
-    x = field.rand(seed)
+    x = field.rand(str(seed).encode())
     y = x**int(field(-1)/n)
     if y == 1 or y**(n//2) == 1:
-        return get_omega(field, n)
+        return get_omega(field, n, seed+1)
     assert y**n == 1, "omega must be 2n'th root of unity"
     assert y**(n // 2) != 1, "omega must be primitive 2n'th root of unity"
     return y
@@ -64,14 +64,6 @@ def interpolate_g1_at(shares, x_recomb, multiexp, ZR):
         #sum += i
     return multiexp(list(ys), vector)
 
-
-def get_g1_coeffs(coords, t, n, G1, ZR, order=-1):
-    coeffs = [G1.identity()]*(t+1)
-    # FIXME: This is an incorrect implementation.
-    # Currently this is just a place holder
-    for i in range(t+1):
-        coeffs[i] = coords[i][1]
-    return coeffs
 
 # To optimize this using NTT
 def interpolate_g1_at_all(coords, n, G1, ZR, order=-1):

@@ -1,13 +1,16 @@
-from pypairing import ZR as blsZR, G1 as blsG1
+from pypairing import ZR as blsZR, G1 as blsG1, G2 as blsG2
 from pypairing import Curve25519ZR as ZR
 
 class Serial:
-    def __init__(self, G1):
-        self.G1 = G1
+    def __init__(self, G):
+        self.G = G
         self.f_size = 32
-        if G1 is blsG1:
+        if G is blsG1:
             self.ZR = blsZR
             self.g_size = 48
+        elif G is blsG2:
+            self.ZR = blsZR
+            self.g_size = 96
         else:
             self.ZR = ZR
             self.g_size = 32
@@ -17,7 +20,7 @@ class Serial:
         return g.__getstate__()
 
     def deserialize_g(self, data):
-        g = self.G1()
+        g = self.G()
         g.__setstate__(data)
         return g
 
@@ -25,8 +28,17 @@ class Serial:
         n = len(data)//self.g_size
         gs = [None for _ in range(n)]
         for i in range(n):            
-            g = self.G1()
+            g = self.G()
             g.__setstate__(data[i*self.g_size:(i+1)*self.g_size])
+            gs[i] = g
+        return gs
+
+    def deserialize_g2s(self, data):
+        n = len(data)//self.g_size
+        gs = [None for _ in range(n)]
+        for i in range(n):            
+            g = self.G()
+            g.__setstate__(bytes(data[i*self.g_size:(i+1)*self.g_size]))
             gs[i] = g
         return gs
 
