@@ -4,6 +4,10 @@
 3. After you are done testing you can delete the VMs using `python -m aws.delete_vms`.
 4. The value of `N` for the total number of VMs created in all the regions.
 
+`------------------IMPORTANT ------------------`
+Ensure that the shared randomness i.e., CRS used in the aws experiement is identicatl acrross all VMs
+`----------------------------------------------`
+
 # Configuration
 1. This code pulls the docker image with tag:`latest` from [here](https://hub.docker.com/r/sourav1547/adkg/tags/). In order to replace the docker image, update `image_path` in `aws-config.json` with the appropriate image.
 2. Make sure you have the following two environment variables set to appropriate values. Please use the export command if you are setting them within the container. Eg: `export <key>=<value>`.
