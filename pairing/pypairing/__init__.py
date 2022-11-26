@@ -25,7 +25,8 @@ from .pypairing import (
     curve25519multiexp,
     blsmultiexp,
     blsmultiexp2,
-    blsfft
+    blsfft,
+    robustblsfft
 )
 
 __all__ = [
@@ -53,5 +54,6 @@ __all__ = [
     "curve25519multiexp",
     "blsmultiexp",
     "blsmultiexp2",
-    "blsfft"
+    "blsfft",
+    "robustblsfft"
 ]

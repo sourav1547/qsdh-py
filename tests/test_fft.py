@@ -1,6 +1,7 @@
-from pypairing import ZR, G1, blsfft, blsmultiexp
+from pypairing import ZR, G1, blsfft, blsmultiexp, robustblsfft
 from adkg.polynomial import polynomials_over
 import random
+from random import shuffle
 
 def get_omega(field, n, seed=None):
     """
@@ -44,3 +45,26 @@ def test_fft():
 
         coeffs += [g**0]*(n-len(coeffs))
         assert res == coeffs
+
+def test_batch_fft():
+    for i in range(5): 
+        n = 2**(i+2)
+        t = random.randint(1, n-1)
+        g = G1.rand(b'g')
+
+        omega2 = get_omega(ZR, 2 * n)
+        omega = omega2 ** 2
+
+        p = polynomials_over(ZR)
+        poly = p.random(t)
+
+        zs = list(range(n))
+        shuffle(zs)
+        zs = zs[:t+1]
+        ys = list(poly.evaluate_fft(omega, n))
+        ys = [g**ys[i] for i in zs]
+
+        coeffs = [g**x for x in poly.coeffs]
+        fft_rep = robustblsfft(zs, [ys], omega2, n)
+
+        assert fft_rep[0] == coeffs

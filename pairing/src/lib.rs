@@ -2857,6 +2857,21 @@ fn blsfft(gs: &PyList, omega: &PyAny, n: usize) -> PyResult<Vec<PyG1>>{
     return Ok(output);
 }
 
+fn blsfft_internal(gs: &Vec<PyG1>, omega: &PyFr, n: usize) -> Vec<PyG1>{
+    let mut gs_vec : Vec<PyG1> = Vec::new();
+    for gi in gs.iter() {
+        gs_vec.push((*gi).clone());
+    }
+
+    let mut zero = PyG1::new();
+    zero.zero();
+    for _ in 0..n-gs.len() {
+        gs_vec.push(zero.clone());
+    }
+    let output = blsfft_helper(gs_vec, omega.clone());
+    return output;
+}
+
 // #[pyfunction]
 fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
     let n = gs.len();
@@ -2906,6 +2921,124 @@ fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
         result_vec.push(even_.clone());
     }
     return result_vec;
+}
+
+
+fn fnt_decode_step1(zs: Vec<usize>, omega2: PyFr, n: usize) -> (Vec<PyFr>, Vec<PyFr>) {
+    let k = zs.len();
+    let mut omega = omega2.clone();
+    omega.square();
+    let mut xs = Vec::new();
+    for z in zs {
+        let mut o = omega.clone();
+        let fz = PyFr{fr: Fr::from_repr(FrRepr([z as u64, 0, 0, 0])).unwrap()};
+        o.pow_assign(&fz);
+        xs.push(o);
+    }
+    let mut as_ = Vec::new();
+    let mut ais_ = Vec::new();
+
+    for i in 0..2*n {
+        let mut oi = omega2.clone();
+        let fi = PyFr{fr: Fr::from_repr(FrRepr([i as u64, 0, 0, 0])).unwrap()};
+        oi.pow_assign(&fi);
+        let mut a = PyFr{fr: Fr::from_repr(FrRepr([1 as u64, 0, 0, 0])).unwrap()};
+        for x in &xs {
+            oi.sub_assign(x);
+            a.mul_assign(&oi);
+        }
+        as_.push(a);
+    }
+
+    for i in 0..k {
+        let mut ai = PyFr{fr: Fr::from_repr(FrRepr([1 as u64, 0, 0, 0])).unwrap()};
+        for j in 0..k {
+            if i != j {
+                let mut xsi = xs[i].clone();
+                xsi.sub_assign(&xs[j]);
+                ai.mul_assign(&xsi);
+            }
+        }
+        ais_.push(ai);
+    }
+    return (as_, ais_);
+}
+
+fn fnt_decode_step2(zs: Vec<usize>, ys: Vec<PyG1>, as_: Vec<PyFr>, ais_: Vec<PyFr>, omega2: PyFr, n: usize) -> Vec<PyG1> {
+    let k = ys.len();
+    let mut omega = omega2.clone();
+    omega.square();
+
+    let g1 = PyG1::new();
+    let mut ncoeffs = vec![g1; n];
+    for i in 0..k {
+        let mut ais_inv = ais_[i].clone();
+        ais_inv.inverse();
+        let mut yi = ys[i].clone();
+        yi.mul_assign(&ais_inv);
+        ncoeffs[zs[i]] = yi;
+    }
+    
+    let mut nevals = blsfft_internal(&ncoeffs, &omega, n);
+    nevals.reverse();
+    let mut fminusone = PyFr{fr: Fr::from_repr(FrRepr([1 as u64, 0, 0, 0])).unwrap()};
+    fminusone.negate();
+
+    let mut power_a = Vec::with_capacity(nevals.len());
+    for i in 0..nevals.len() {
+        let mut x = nevals[i].clone();
+        x.mul_assign(&fminusone);
+        power_a[i] = x;
+    }
+    let mut pas = blsfft_internal(&power_a, &omega2, 2*n);
+
+    let mut ps = Vec::with_capacity(pas.len());
+    for i in 0..pas.len() {
+        pas[i].mul_assign(&as_[i]);
+        ps[i] = pas[i].clone();
+    }
+
+    let mut omega2_inv = omega2.clone();
+    omega2_inv.inverse();
+    let prec = blsfft_internal(&ps, &omega2_inv, 2*n);
+    let mut two_n_inv = PyFr{fr: Fr::from_repr(FrRepr([2*n as u64, 0, 0, 0])).unwrap()};
+    two_n_inv.inverse();
+    
+    let mut result = Vec::with_capacity(k); 
+    for i in 0..k {
+        let mut x = prec[i].clone();
+        x.mul_assign(&two_n_inv);
+        result[i] = x;
+    }
+    return result;
+}
+
+#[pyfunction]
+fn robustblsfft(xs: Vec<usize>, ys_shares: &PyList, omega2: &PyAny, n: usize) -> PyResult<Vec<Vec<PyG1>>>{
+    let aicel: &PyCell<PyFr> = omega2.downcast()?;
+    let omega2_new: &PyFr = &aicel.borrow();
+    let (as_, ais_) = fnt_decode_step1(xs.clone(), (*omega2_new).clone(), n);
+    let x_len = xs.len();
+
+    let num = ys_shares.len() / x_len;
+    let mut result = Vec::with_capacity(num);
+
+    let mut ys_shares_vec = Vec::new();
+    for ys in ys_shares {
+        ys_shares_vec.push(ys);
+    }
+
+    for k in 0..num {
+        let mut shares_vec : Vec<PyG1> = Vec::with_capacity(x_len);
+        for i in 0..x_len {
+            let aicel: &PyCell<PyG1> = ys_shares_vec[k * x_len + i].downcast()?;
+            let aif: &PyG1 = &aicel.borrow();
+            shares_vec[i] = PyG1{ g1: aif.g1, pp: Vec::new(), pplevel:0 };
+        }
+        let res = fnt_decode_step2(xs.clone(), shares_vec, as_.clone(), ais_.clone(), (*omega2_new).clone(), n);
+        result[k] = res;
+    }
+    return Ok(result);
 }
 
 //nvm, this appears to be way slower. Damn it all.
@@ -3338,6 +3471,8 @@ fn pypairing(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(blsmultiexp))?;
     m.add_wrapped(wrap_pyfunction!(blsmultiexp2))?;
     m.add_wrapped(wrap_pyfunction!(blsfft))?;
+    m.add_wrapped(wrap_pyfunction!(robustblsfft))?;
+    
 
     m.add_wrapped(wrap_pyfunction!(hashcurve25519zrs))?;
     m.add_wrapped(wrap_pyfunction!(hashcurve25519gs))?;
