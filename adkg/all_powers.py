@@ -70,11 +70,9 @@ class ALL_POWERS:
         
         # computing the seed for random linear combination
         # Only compute once while sending the messages
-        datab = bytearray()
-        for i in range(ell):
-            datab.extend(self.sr.serialize_gs(self.evals[i]))
+        datas = str(self.evals)
         try:
-            commit = str(datab).encode()
+            commit = datas.encode()
         except AttributeError:
             pass 
         hs =  hashlib.sha256(commit).digest() 
