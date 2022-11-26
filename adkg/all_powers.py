@@ -6,6 +6,7 @@ from adkg.utils.poly_misc import interpolate_g1_at_x, prep_for_fft
 from adkg.extra_proofs import CP
 from pypairing import pair
 import time
+import hashlib
 
 
 import logging
@@ -53,7 +54,7 @@ class ALL_POWERS:
     def kill(self):
         self.subscribe_recv_task.cancel()
 
-    def batch_mul_shares(self, cur_share, cur_powers):
+    def batch_mul_shares(self, idx, cur_share, cur_powers):
         start = time.time()
         m = len(cur_powers)
         padding = 0 + (m%(self.deg) != 0)
@@ -68,21 +69,43 @@ class ALL_POWERS:
         
         self.evals = [self.blsfft(polys[i], self.omega, self.n) for i in range(ell)] 
         out_evals = [[self.evals[i][node]**cur_share for i in range(ell)] for node in range(self.n)]
+        
+        # computing the seed for random linear combination
+        # Only compute once while sending the messages
+        datab = bytearray()
+        for i in range(ell):
+            datab.extend(self.sr.serialize_gs(self.evals[i]))
+        try:
+            commit = str(datab).encode()
+        except AttributeError:
+            pass 
+        hs =  hashlib.sha256(commit).digest() 
+        seed = self.ZR.hash(hs)
 
-        # proofs = [[None]*ell for _ in range(self.n)]
-        chals = [[None]*ell for _ in range(self.n)]
-        resps = [[None]*ell for _ in range(self.n)]
+        # seed = self.ZR.hash(hashlib.sha256(str(self.evals).encode()).digest())
+        self.rands2[idx] = [self.ZR.hash(str(seed+i).encode()) for i in range(ell)]
+        proofs = [None]*self.n
         x = self.g**cur_share
+        self.h_vector[idx] = [self.G1.identity()]*self.n
+        for node in range(self.n):
+            hs = [self.evals[i][node] for i in range(ell)]
+            h = self.multiexp(hs, self.rands2[idx])
+            if node == self.my_id:
+                self.h_vector[idx] = h
+            y = self.multiexp(out_evals[node], self.rands2[idx])
+            cp = CP(self.g, h, self.ZR, self.multiexp)
+            proofs[node] = cp.prove(cur_share, x, y)
+        return (out_evals, proofs)
+
+        proofs = [[None]*ell for _ in range(self.n)]
         for i in range(ell):
             for node in range(self.n):
                 h = self.evals[i][node]
                 cp = CP(self.g, h, self.ZR, self.multiexp)
-                chal, res = cp.prove(cur_share, x, out_evals[node][i])
-                chals[node][i] = chal
-                resps[node][i] = res
+                proofs[node][i] = cp.prove(cur_share, x, out_evals[node][i])
         time_taken = time.time() - start
         self.benchmark_logger.info(f"SHARE gen, ell:{ell}, time:{time_taken}")
-        return (out_evals, chals, resps)
+        return (out_evals, proofs)
     
     def gen_eval_shares(self, idx, all_shares):
         m = 2**idx
@@ -119,16 +142,14 @@ class ALL_POWERS:
         self.benchmark_logger.info(f"Next message gen, ell:{ell}, time:{time_taken}")
         return outputs
 
-    def verify_share(self, sender, s_idx, powers, pfs):
-        ell = len(powers)
+    def verify_share(self, sender, s_idx, powers, pf):
         x = self.t_commits[s_idx][sender+1]
-        for i in range(ell):
-            h = self.evals[i][self.my_id]
-            y, pf = powers[i], pfs[i]
-            cp = CP(self.g, h, self.ZR, self.multiexp)
-            if not cp.verify(x, y, pf):
-                return False
-        return True
+        y = self.multiexp(powers, self.rands2[s_idx])
+        h = self.h_vector[s_idx]
+        cp = CP(self.g, h, self.ZR, self.multiexp)
+        if not cp.verify(x, y, pf):
+            return False
+        return cp.verify(x, y, pf)
     
     def verify_eval(self, sender, idx, powers):
         ell = len(powers)
@@ -143,8 +164,8 @@ class ALL_POWERS:
         msgs = self.msg_buff[s_idx][type]
         if type == APMsgType.SHARE:
             for sender, s_msg in msgs.items():
-                powers, pfs = self.decode(s_msg)
-                if self.verify_share(sender, s_idx, powers, pfs):
+                powers, pf = self.decode(s_msg)
+                if self.verify_share(sender, s_idx, powers, pf):
                     v_msgs[sender] = powers
                 if len(v_msgs) == self.t+1:
                     break
@@ -156,22 +177,23 @@ class ALL_POWERS:
                 if len(v_msgs) == self.deg:
                     break
         return v_msgs
-    
-    def encode(self, msgs, chal, res):
+
+    def encode(self, msgs, pf):
+        chal, res = pf
         datab = self.sr.serialize_gs(msgs)
-        datab.extend(self.sr.serialize_fs(chal))
-        datab.extend(self.sr.serialize_fs(res))
+        datab.extend(self.sr.serialize_f(chal))
+        datab.extend(self.sr.serialize_f(res))
         return datab
     
     def decode(self, data):
         g_size = 48
         f_size = 32
         data = bytes(data)
-        ell = len(data)//(g_size+2*f_size)
+        ell = (len(data)-2*f_size)//g_size
         shares = self.sr.deserialize_gs(data[:ell*g_size])
-        chals = self.sr.deserialize_fs(data[ell*g_size:ell*(g_size+f_size)])
-        reps = self.sr.deserialize_fs(data[ell*(g_size+f_size):])
-        return shares, list(zip(chals, reps))
+        chal = self.sr.deserialize_f(data[ell*g_size: ell*g_size+f_size])
+        resp = self.sr.deserialize_f(data[ell*g_size+f_size:])
+        return shares, (chal, resp)
 
     #@profile
     async def powers(self, t_shares, t_commits, t_powers, g2powers):
@@ -187,14 +209,16 @@ class ALL_POWERS:
 
         self.msg_buff = [{APMsgType.SHARE:{}, APMsgType.EVAL:{}} for _ in range(self.logq)]
         cur_powers = [self.g]
+        self.rands2 = {}
+        self.h_vector = {}
 
         for idx in range(self.logq):
             elapsed_time = time.time() - self.start_time
             self.benchmark_logger.info(f"AP start index:{idx}, elapsed time {(elapsed_time)}")
             cur_share = self.t_shares[idx]
-            share_msgs, share_chals, share_resps = self.batch_mul_shares(cur_share, cur_powers)
+            share_msgs, share_pfs = self.batch_mul_shares(idx, cur_share, cur_powers)
             for node in range(self.n):
-                datab = self.encode(share_msgs[node], share_chals[node], share_resps[node])
+                datab = self.encode(share_msgs[node], share_pfs[node])
                 send(node, (APMsgType.SHARE, idx, datab))
 
             temp_shares = self.verify_msgs(APMsgType.SHARE, idx)
