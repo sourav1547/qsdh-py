@@ -1,8 +1,7 @@
-import asyncio
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
-from adkg.utils.poly_misc import interpolate_g1_at_x, prep_for_fft
+from adkg.utils.poly_misc import prep_for_fft, interpolate_g1_batch_at
 from adkg.extra_proofs import CP
 from pypairing import pair
 import time
@@ -46,7 +45,6 @@ class ALL_POWERS:
         self.get_send = _send
         self.poly = polynomials_over(self.ZR)
         self.poly.clear_cache()
-        self.output_queue = asyncio.Queue()
 
     def __enter__(self):
         return self
@@ -54,19 +52,19 @@ class ALL_POWERS:
     def kill(self):
         self.subscribe_recv_task.cancel()
 
-    def batch_mul_shares(self, idx, cur_share, cur_powers):
+    def batch_mul_shares(self, idx, cur_share):
         start = time.time()
-        m = len(cur_powers)
+        # m = len(cur_powers)
+        m = 2**idx
         padding = 0 + (m%(self.deg) != 0)
         ell = m//(self.deg) + padding
         polys = [None]*ell
         for i in range(ell):
             if i == ell-1 and padding:
-                polys[i] = cur_powers[i*(self.deg):m]
+                polys[i] = self.cur_powers[i*(self.deg):m]
             else:
-                polys[i] = cur_powers[i*(self.deg): (i+1)*(self.deg)]
-        
-        
+                polys[i] = self.cur_powers[i*(self.deg): (i+1)*(self.deg)]
+            
         self.evals = [self.blsfft(polys[i], self.omega, self.n) for i in range(ell)] 
         out_evals = [[self.evals[i][node]**cur_share for i in range(ell)] for node in range(self.n)]
         
@@ -82,49 +80,39 @@ class ALL_POWERS:
         hs =  hashlib.sha256(commit).digest() 
         seed = self.ZR.hash(hs)
 
-        # seed = self.ZR.hash(hashlib.sha256(str(self.evals).encode()).digest())
         self.rands2[idx] = [self.ZR.hash(str(seed+i).encode()) for i in range(ell)]
         proofs = [None]*self.n
         x = self.g**cur_share
         self.h_vector[idx] = [self.G1.identity()]*self.n
         for node in range(self.n):
-            hs = [self.evals[i][node] for i in range(ell)]
-            h = self.multiexp(hs, self.rands2[idx])
+            h = self.multiexp([self.evals[i][node] for i in range(ell)], self.rands2[idx])
             if node == self.my_id:
                 self.h_vector[idx] = h
             y = self.multiexp(out_evals[node], self.rands2[idx])
             cp = CP(self.g, h, self.ZR, self.multiexp)
             proofs[node] = cp.prove(cur_share, x, y)
+        time_taken = time.time() - start
+        self.benchmark_logger.info(f"SAHRE gen, ell:{ell}, time:{time_taken}")
         return (out_evals, proofs)
 
-        proofs = [[None]*ell for _ in range(self.n)]
-        for i in range(ell):
-            for node in range(self.n):
-                h = self.evals[i][node]
-                cp = CP(self.g, h, self.ZR, self.multiexp)
-                proofs[node][i] = cp.prove(cur_share, x, out_evals[node][i])
-        time_taken = time.time() - start
-        self.benchmark_logger.info(f"SHARE gen, ell:{ell}, time:{time_taken}")
-        return (out_evals, proofs)
-    
     def gen_eval_shares(self, idx, all_shares):
         m = 2**idx
         ell = m//(self.deg) + (m%(self.deg) != 0)
-        outputs = [self.G1.identity()]*ell
-        for loc in range(ell):
-            coords = []
-            for node, shares in all_shares.items():
-                coords.append([node+1, shares[loc]])
-            outputs[loc] = interpolate_g1_at_x(coords, 0, self.G1, self.ZR)            
-        return outputs
+        xs = []
+        ys_shares = [[] for _ in range(ell)]
+        for node, shares in all_shares.items():
+            xs.append(node+1)
+            for loc in range(ell):
+                ys_shares[loc].append(shares[loc])
         
+        return interpolate_g1_batch_at(xs, ys_shares, 0, self.multiexp, self.ZR)    
 
-    def gen_next_powers(self, idx, all_evals):
+    def update_powers(self, idx, all_evals):
         start = time.time()
         m = 2**idx
         padding  = 0 + (m%(self.deg) != 0)
         ell = m//(self.deg) + padding
-        outputs = [self.G1.identity()]*m
+        outputs = [None]*m
 
         for i in range(ell):
             coords = [None]*self.n
@@ -140,23 +128,21 @@ class ALL_POWERS:
                 outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
         time_taken = time.time() - start
         self.benchmark_logger.info(f"Next message gen, ell:{ell}, time:{time_taken}")
-        return outputs
+        self.cur_powers[2**idx:2**(idx+1)] = outputs
+        return
+        # return outputs
 
     def verify_share(self, sender, s_idx, powers, pf):
         x = self.t_commits[s_idx][sender+1]
         y = self.multiexp(powers, self.rands2[s_idx])
         h = self.h_vector[s_idx]
         cp = CP(self.g, h, self.ZR, self.multiexp)
-        if not cp.verify(x, y, pf):
-            return False
         return cp.verify(x, y, pf)
     
     def verify_eval(self, sender, idx, powers):
         ell = len(powers)
-        rands = self.rands[:ell]
-        l_powers = [self.evals[i][sender] for i in range(ell)]
-        g1rlc = self.multiexp(powers, rands)
-        l_g1rlc = self.multiexp(l_powers, rands)
+        g1rlc = self.multiexp(powers, self.rands[:ell])
+        l_g1rlc = self.multiexp([self.evals[i][sender] for i in range(ell)], self.rands[:ell])
         return pair(g1rlc, self.g2) == pair(l_g1rlc, self.g2powers[idx])
 
     def verify_msgs(self, type, s_idx):
@@ -208,7 +194,8 @@ class ALL_POWERS:
         self.deg = self.n-self.t
 
         self.msg_buff = [{APMsgType.SHARE:{}, APMsgType.EVAL:{}} for _ in range(self.logq)]
-        cur_powers = [self.g]
+        self.cur_powers = [self.G1.identity()]*(2**self.logq)
+        self.cur_powers[0] = self.g
         self.rands2 = {}
         self.h_vector = {}
 
@@ -216,7 +203,7 @@ class ALL_POWERS:
             elapsed_time = time.time() - self.start_time
             self.benchmark_logger.info(f"AP start index:{idx}, elapsed time {(elapsed_time)}")
             cur_share = self.t_shares[idx]
-            share_msgs, share_pfs = self.batch_mul_shares(idx, cur_share, cur_powers)
+            share_msgs, share_pfs = self.batch_mul_shares(idx, cur_share)
             for node in range(self.n):
                 datab = self.encode(share_msgs[node], share_pfs[node])
                 send(node, (APMsgType.SHARE, idx, datab))
@@ -252,10 +239,9 @@ class ALL_POWERS:
                         s_powers = self.sr.deserialize_gs(bytes(s_msg))
                         if self.verify_eval(sender, s_idx, s_powers):
                             temp_evals[sender] = s_powers
-                        if len(temp_evals) >= self.n:
-                            next_powers = self.gen_next_powers(idx, temp_evals)
-                            # Updating cur_powers as [cur_powers, next_powers]
-                            cur_powers = cur_powers + next_powers
+                        if len(temp_evals) >= self.deg:
+                            # Updating cur_powers with newly computed values
+                            self.update_powers(idx, temp_evals)
                             break
 
-        return cur_powers
+        return self.cur_powers

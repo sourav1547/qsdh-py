@@ -1,4 +1,6 @@
 # This function outputs roots of unity
+from functools import reduce
+import operator
 
 def get_omega(field, n, seed=None):
     """
@@ -44,8 +46,6 @@ def interpolate_g1_at_x(coords, x, G, ZR, order=-1):
         out *= (sortedcoords[i][1] ** (lagrange_at_x(s, xs[i], x, ZR)))
     return out
 
-from functools import reduce
-import operator
 def interpolate_g1_at(shares, x_recomb, multiexp, ZR):
     # shares are in the form (x, y=f(x))
     if type(x_recomb) is int:
@@ -63,6 +63,23 @@ def interpolate_g1_at(shares, x_recomb, multiexp, ZR):
     #for i in map(operator.mul, vector, ys):
         #sum += i
     return multiexp(list(ys), vector)
+
+def interpolate_g1_batch_at(xs, shares, x_recomb, multiexp, ZR):
+    # shares are in the form (x, y=f(x))
+    if type(x_recomb) is int:
+        x_recomb = ZR(x_recomb)
+    vector = []
+    for i, x_i in enumerate(xs):
+        factors = [
+            #(x_k - x_recomb) / (x_k - x_i) for k, x_k in enumerate(xs) if k != i
+            (x_recomb - x_k) / (x_i - x_k) for k, x_k in enumerate(xs) if k != i
+        ]
+        vector.append(reduce(operator.mul, factors))
+    #return sum(map(operator.mul, ys, vector))
+    #sum = field(0)
+    #for i in map(operator.mul, vector, ys):
+        #sum += i
+    return [multiexp(share, vector) for share in shares]
 
 
 # To optimize this using NTT

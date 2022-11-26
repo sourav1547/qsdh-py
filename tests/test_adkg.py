@@ -39,7 +39,7 @@ async def test_adkg(test_router):
     t = 1
     logq = 5
     n = 3*t+1
-    # n = 8
+    t, n = 2, 8
     omega = get_omega(ZR, n, 1729)
     g, h, g2, pks, sks = get_avss_params(n, G1, G2)
     sends, recvs, _ = test_router(n, maxdelay=0.01)
