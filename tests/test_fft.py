@@ -1,5 +1,5 @@
-from pypairing import ZR, G1, blsfft, blsmultiexp, robustblsfft, fnt_decode_step1
-from adkg.polynomial import polynomials_over
+from pypairing import ZR, G1, blsfft, blsmultiexp, robustblsfft
+from adkg.polynomial import polynomials_over, fnt_decode_step1, fnt_decode_step2
 import random
 from random import shuffle
 
@@ -47,7 +47,7 @@ def test_fft():
         assert res == coeffs
 
 def test_batch_fft():
-    for i in range(1): 
+    for i in range(5): 
         n = 2**(i+2)
         t = random.randint(1, n-1)
         g = G1.rand(b'g')
@@ -63,13 +63,23 @@ def test_batch_fft():
         zs = zs[:t+1]
         ys = list(poly.evaluate_fft(omega, n))
         evals = [g**ys[i] for i in range(n)]
+        ys_ = [ys[i] for i in zs]
         ys = [g**ys[i] for i in zs]
+        ys = ys + ys
 
         coeffs = [g**x for x in poly.coeffs]
         fft_rep = robustblsfft(zs, ys, omega2, n)
 
-        fft_inv = blsfft(evals, omega**(-1), n)
-        n_zr = ZR(n)
-        res = [x**(n_zr**(-1)) for x in fft_inv]
+        # as_, ais_ = fnt_decode_step1(p, zs, omega2, n)
 
+        # fft_inv = blsfft(evals, omega**(-1), n)
+        # n_zr = ZR(n)
+        # res = [x**(n_zr**(-1)) for x in fft_inv]
+
+        # res = fnt_decode_step2(p, zs, ys_, as_, ais_, omega2, n)
+
+        # if fft_rep[0] != coeffs:
+        #     print(as_)
+        #     print(ais_)
         assert fft_rep[0] == coeffs
+        assert fft_rep[1] == coeffs
