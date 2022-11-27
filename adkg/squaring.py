@@ -18,9 +18,8 @@ class SQUARE:
             self, g, n, t, logq, my_id, send, recv, curve_params
     ):  # (# noqa: E501)
         self.n, self.t, self.logq, self.my_id = n, t, logq, my_id
-        self.q = 2**self.logq
         self.g = g
-        self.ZR, self.G1, self.multiexp, self.dotprod = curve_params
+        self.ZR, self.G1, self.multiexp, _ = curve_params
         self.sr = Serial(self.G1)
 
         self.benchmark_logger = logging.LoggerAdapter(
@@ -37,20 +36,13 @@ class SQUARE:
         self.get_send = _send
         self.poly = polynomials_over(self.ZR)
         self.poly.clear_cache()
-        self.output_queue = asyncio.Queue()
-        self.tagvars = {}
-        self.data = {}
 
     def __enter__(self):
         return self
 
     def kill(self):
         self.subscribe_recv_task.cancel()
-        for key in self.tagvars:
-            for task in self.tagvars[key]['tasks']:
-                task.cancel()
-
-    # FIXME: Possibly missing s_x and d_shares
+        
     def verify_sq(self, idx, sender, s_reveal, s_y, s_pf):
         s_x = self.th_powers[idx-1][sender+1]
         cp = CP(self.g, s_x, self.ZR, self.multiexp)

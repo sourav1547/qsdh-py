@@ -163,7 +163,7 @@ COPY adkg/__version__.py adkg/
 COPY adkg/__init__.py adkg/
 COPY adkg/ntl/ adkg/ntl/
 # COPY apps/asynchromix/solver/ apps/asynchromix/solver/
-RUN pip install -e .['tests,docs']
+RUN pip install -e .['tests']
 
 # This is the target that can minimally run the unit tests.
 FROM pre-prod AS prod
@@ -198,7 +198,6 @@ RUN echo "alias cls=\"clear && printf '\e[3J'\"" >> ~/.bashrc
 
 # If you're testing out apt dependencies, put them here
 RUN apt-get install -y --no-install-recommends \
-    tmux \
     vim
 
 # RUN npm install -g ganache-cli

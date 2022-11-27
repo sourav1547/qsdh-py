@@ -1,4 +1,4 @@
-from pypairing import ZR, G1, blsfft, blsmultiexp, robustblsfft
+from pypairing import ZR, G1, blsfft, blsmultiexp, robustblsfft, fnt_decode_step1
 from adkg.polynomial import polynomials_over
 import random
 from random import shuffle
@@ -47,7 +47,7 @@ def test_fft():
         assert res == coeffs
 
 def test_batch_fft():
-    for i in range(5): 
+    for i in range(1): 
         n = 2**(i+2)
         t = random.randint(1, n-1)
         g = G1.rand(b'g')
@@ -62,9 +62,14 @@ def test_batch_fft():
         shuffle(zs)
         zs = zs[:t+1]
         ys = list(poly.evaluate_fft(omega, n))
+        evals = [g**ys[i] for i in range(n)]
         ys = [g**ys[i] for i in zs]
 
         coeffs = [g**x for x in poly.coeffs]
-        fft_rep = robustblsfft(zs, [ys], omega2, n)
+        fft_rep = robustblsfft(zs, ys, omega2, n)
+
+        fft_inv = blsfft(evals, omega**(-1), n)
+        n_zr = ZR(n)
+        res = [x**(n_zr**(-1)) for x in fft_inv]
 
         assert fft_rep[0] == coeffs

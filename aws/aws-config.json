@@ -2,8 +2,8 @@
 {
     "mpc" : {
         "command": "python3 -m scripts.adkg_run",
-        "t": 5, 
-        "n": 16,
+        "t": 10, 
+        "n": 32,
         "k": 15,
         "num_faulty_nodes": 0,
         "port": 7001

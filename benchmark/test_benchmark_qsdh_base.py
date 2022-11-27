@@ -49,12 +49,18 @@ async def run_qsdh_base_ver(params):
     g, g2, n, logq, = params
     q = 2**logq
     output_g1 = {0:[g]*q}
-    # output_g2 = {0:[g2]*q}
+    output_g2 = {0:[g2]*2}
+    proofs = [None]*(n-1)
+    
+    def verify(idx):
+        for node in range(1,idx):
+
+            
     for i in range(1, n+1):
         alpha = ZR.rand()
         cur_alpha = alpha
         output_g1[i] = [None]*q
+        output_g2[i] = [output_g2[i-1]**alpha**j for j in range(2)]
         for ii in range(q):
             output_g1[i][ii] = output_g1[i-1][ii]**(cur_alpha)
             cur_alpha = cur_alpha*alpha
-            # output_g2[i][ii] = output_g2[i-1][ii]**(alpha**ii)

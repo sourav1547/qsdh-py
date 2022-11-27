@@ -18,7 +18,6 @@ class RANDOUSHA:
     def __init__(self, g, h, n, t, logq, my_id, send, recv, curve_params, matrices):
         self.g, self.h = g, h
         self.n, self.t, self.logq, self.my_id = (n, t, logq, my_id)
-        self.q = 2**self.logq
         self.send, self.recv = send, recv
         self.ZR, self.G1, self.multiexp, self.dotprod = curve_params
         self.poly = polynomials_over(self.ZR)
