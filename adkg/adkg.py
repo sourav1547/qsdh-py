@@ -27,10 +27,10 @@ class ADKGMsgType:
     G = "G"
     
 class ADKG:
-    def __init__(self, public_keys, private_key, g, h, g2, n, t, logq, my_id, omega, send, recv, pc, curve_params, matrices):
+    def __init__(self, public_keys, private_key, g, h, g2, n, t, logq, my_id, omega2, send, recv, pc, curve_params, matrices):
         self.public_keys, self.private_key, self.g, self.h = (public_keys, private_key, g, h)
         self.g2 = g2
-        self.n, self.t, self.logq, self.my_id, self.omega = (n, t, logq, my_id, omega)
+        self.n, self.t, self.logq, self.my_id, self.omega2 = (n, t, logq, my_id, omega2)
         self.q = 2**self.logq
         # Total number of secrets: 1 for ACS, 1 for tau, logq*(1+2) for random double sharing
         self.sc = 3*self.logq + 2 
@@ -302,7 +302,7 @@ class ADKG:
     async def all_powers(self, t_shares, t_commits, t_powers, g2powers):
         aptag = ADKGMsgType.AP
         apsend, aprecv = self.get_send(aptag), self.subscribe_recv(aptag)
-        self.ap = ALL_POWERS(self.g, self.g2, self.n, self.t, self.logq, self.my_id, self.omega, apsend, aprecv, self.curve_params)
+        self.ap = ALL_POWERS(self.g, self.g2, self.n, self.t, self.logq, self.my_id, self.omega2, apsend, aprecv, self.curve_params)
         self.ap_task = asyncio.create_task(self.ap.powers(t_shares, t_commits, t_powers, g2powers))
         powers  = await self.ap_task
         return powers

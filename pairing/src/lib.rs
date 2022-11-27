@@ -2925,25 +2925,19 @@ fn blsfft_helper(gs: Vec<PyG1>, omega: PyFr) -> Vec<PyG1>{
 
 
 fn fnt_decode_step1(zs: Vec<usize>, omega2: PyFr, n: usize) -> (Vec<PyFr>, Vec<PyFr>) {
-    eprintln!("11");
     let k = zs.len();
     let mut omega = omega2.clone();
     omega.square();
     let mut xs = Vec::new();
-    eprintln!("12");
     for z in zs {
-        eprintln!("13");
         let mut o = omega.clone();
         let fz = PyFr{fr: Fr::from_repr(FrRepr([z as u64, 0, 0, 0])).unwrap()};
         o.pow_assign(&fz);
         xs.push(o);
     }
-    eprintln!("14");
     let mut as_ = Vec::new();
     let mut ais_ = Vec::new();
-    eprintln!("15");
     for i in 0..2*n {
-        eprintln!("16");
         let mut a = PyFr{fr: Fr::from_repr(FrRepr([1 as u64, 0, 0, 0])).unwrap()};
         for x in &xs {
             let mut oi = omega2.clone();
@@ -2953,11 +2947,9 @@ fn fnt_decode_step1(zs: Vec<usize>, omega2: PyFr, n: usize) -> (Vec<PyFr>, Vec<P
             a.mul_assign(&oi);
         }
         as_.push(a);
-        eprintln!("17");
     }
 
     for i in 0..k {
-        eprintln!("18");
         let mut ai = PyFr{fr: Fr::from_repr(FrRepr([1 as u64, 0, 0, 0])).unwrap()};
         for j in 0..k {
             if i != j {
@@ -2966,7 +2958,6 @@ fn fnt_decode_step1(zs: Vec<usize>, omega2: PyFr, n: usize) -> (Vec<PyFr>, Vec<P
                 ai.mul_assign(&xsi);
             }
         }
-        eprintln!("19 {:?} {:?}", i, ai.__str__());
         ais_.push(ai);
         
     }
@@ -2975,82 +2966,56 @@ fn fnt_decode_step1(zs: Vec<usize>, omega2: PyFr, n: usize) -> (Vec<PyFr>, Vec<P
 
 fn fnt_decode_step2(zs: Vec<usize>, ys: Vec<PyG1>, as_: Vec<PyFr>, ais_: Vec<PyFr>, omega2: PyFr, n: usize) -> Vec<PyG1> {
     let k = ys.len();
-    eprintln!("300 {:?}", k);
     let mut omega = omega2.clone();
     omega.square();
 
     let mut zero = PyG1::new();
     zero.zero();
     let mut ncoeffs = vec![zero; n];
-    eprintln!("301");
     for i in 0..k {
-        eprintln!("302 {:?}", i);
         let mut ais_inv = ais_[i].clone();
         ais_inv.inverse();
         let mut yi = ys[i].clone();
         yi.mul_assign(&ais_inv);
         ncoeffs[zs[i]] = yi;
-        eprintln!("303 {:?}", i);
     }
 
-    eprintln!("304");
     let mut nevals = blsfft_internal(&ncoeffs, &omega, n);
     nevals.reverse();
-    let mut fzero = PyFr{fr: Fr::from_repr(FrRepr([0 as u64, 0, 0, 0])).unwrap()};
 
     let mut fminusone = PyFr{fr: Fr::from_repr(FrRepr([1 as u64, 0, 0, 0])).unwrap()};
-    fzero.sub_assign(&fminusone);
-
     fminusone.negate();
-
-    if !fzero.equals(&fminusone) {
-        panic!();
-    }
-
-    eprintln!("305");
 
     // let mut power_a = Vec::with_capacity(nevals.len());
     let mut power_a = Vec::new();
     for i in 0..nevals.len() {
-        eprintln!("306 {:?}", i);
         let mut x = nevals[i].clone();
         x.mul_assign(&fminusone);
         power_a.push(x);
-        eprintln!("307 {:?}", i);
     }
-    eprintln!("308");
     let pas = blsfft_internal(&power_a, &omega2, 2*n);
-    eprintln!("309");
     let mut ps = Vec::new();
     // let mut ps = Vec::with_capacity(pas.len());
     for i in 0..pas.len() {
-        eprintln!("310 {:?}", i);
         let mut pas_ = pas[i].clone();
         pas_.mul_assign(&as_[i]);
         ps.push(pas_);
         // ps[i] = pas[i].clone();
-        eprintln!("311 {:?}", i);
     }
-    eprintln!("312");
     let mut omega2_inv = omega2.clone();
     omega2_inv.inverse();
-    eprintln!("313");
     let prec = blsfft_internal(&ps, &omega2_inv, 2*n);
     let mut two_n_inv = PyFr{fr: Fr::from_repr(FrRepr([2*n as u64, 0, 0, 0])).unwrap()};
     two_n_inv.inverse();
-    eprintln!("314");
     
     // let mut result = Vec::with_capacity(k); 
     let mut result = Vec::new();
     for i in 0..k {
-        // eprintln!("315 {:?}", i);
         let mut x = prec[i].clone();
         x.mul_assign(&two_n_inv);
         // result[i] = x;
         result.push(x);
-        // eprintln!("316 {:?}", i);
     }
-    // eprintln!("317");
     return result;
 }
 
@@ -3063,38 +3028,29 @@ fn robustblsfft(xs: Vec<usize>, ys_shares: &PyList, omega2: &PyAny, n: usize) ->
     // eprintln!("as_ {:?} ", as_.clone().iter().map(|x| x.fr).collect::<Vec<Fr>>());
     // eprintln!("ais_ {:?} ", ais_.clone().iter().map(|x| x.fr).collect::<Vec<Fr>>());
 
-
     let x_len = xs.len();
 
     let num = ys_shares.len() / x_len;
     // let mut result = Vec::with_capacity(num);
     let mut result = Vec::new();
-    // eprintln!("3");
 
     let mut ys_shares_vec = Vec::new();
     for ys in ys_shares {
         ys_shares_vec.push(ys);
     }
-    // eprintln!("4 {:?}", ys_shares_vec.len());
 
     for k in 0..num { 
         let mut shares_vec = Vec::new();
         // let mut shares_vec : Vec<PyG1> = Vec::with_capacity(x_len);
-        // eprintln!("5 {:?}", shares_vec.len());
         for i in 0..x_len {
-            // eprintln!("51 {:?}", i);
             let aicel: &PyCell<PyG1> = ys_shares_vec[k * x_len + i].downcast()?;
             let aif: &PyG1 = &aicel.borrow();
-            // eprintln!("52 {:?}", i);
             // shares_vec[i] = PyG1{ g1: aif.g1, pp: Vec::new(), pplevel:0 };
             shares_vec.push(PyG1{ g1: aif.g1, pp: Vec::new(), pplevel:0 });
-            // eprintln!("53 {:?}", aif.g1.to_string());
         }
         let res = fnt_decode_step2(xs.clone(), shares_vec, as_.clone(), ais_.clone(), (*omega2_new).clone(), n);
         result.push(res);
-        // eprintln!("6");
     }
-    // eprintln!("7");
     return Ok(result);
 }
 

@@ -3,7 +3,7 @@ from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
 from adkg.utils.poly_misc import prep_for_fft, interpolate_g1_batch_at
 from adkg.extra_proofs import CP
-from pypairing import pair
+from pypairing import pair, robustblsfft
 import time
 import hashlib
 
@@ -21,11 +21,13 @@ class APMsgType:
 class ALL_POWERS:
     #@profile
     def __init__(
-            self, g, g2, n, t, logq, my_id, omega, send, recv, curve_params
+            self, g, g2, n, t, logq, my_id, omega2, send, recv, curve_params
     ):  # (# noqa: E501)
         self.n, self.t, self.logq, self.my_id = n, t, logq, my_id
         self.g, self.g2 = g, g2
-        self.omega, self.omegainv = omega, omega**(-1)
+        self.omega2 =  omega2
+        self.omega = omega2**2
+        self.omegainv =  self.omega**(-1)
         self.ZR, self.G1, self.multiexp, self.dotprod, self.blsfft = curve_params
         self.sr = Serial(self.G1)
         self.ninv = self.ZR(n)**(-1)
@@ -110,25 +112,25 @@ class ALL_POWERS:
         m = 2**idx
         padding  = 0 + (m%(self.deg) != 0)
         ell = m//(self.deg) + padding
-        outputs = [None]*m
+        
+        zs = list(all_evals.keys())
+        assert len(zs) == self.deg
+        ys = [None]*(self.deg*ell)
 
         for i in range(ell):
-            coords = [None]*self.n
-            for node, evals in all_evals.items():
-                coords[node] = evals[i]
-            coords = prep_for_fft(coords, self.omega, self.n, self.multiexp, self.ZR)
-            
+            ii = 0
+            for _, evals in all_evals.items():
+                ys[i*self.deg+ii] = evals[i]
+                ii = ii + 1
+        fft_rep = robustblsfft(zs, ys, self.omega2, self.n)
+        for i in range(ell):    
             if i == ell-1 and padding:
-                fft_inv = self.blsfft(coords, self.omegainv, self.n)
-                outputs[i*(self.deg):i*(self.deg)+m] = [x**self.ninv for x in fft_inv[:m%(self.deg)]]
+                self.cur_powers[m+i*(self.deg):m+i*(self.deg)+m] = fft_rep[i][:m%self.deg]
             else:
-                fft_inv = self.blsfft(coords, self.omegainv, self.n)
-                outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
+                self.cur_powers[m+i*(self.deg):m+(i+1)*(self.deg)] = fft_rep[i]
+
         time_taken = time.time() - start
         self.benchmark_logger.info(f"Next message gen, ell:{ell}, time:{time_taken}")
-        self.cur_powers[2**idx:2**(idx+1)] = outputs
-        return
-        # return outputs
 
     def verify_share(self, sender, s_idx, powers, pf):
         x = self.t_commits[s_idx][sender+1]
@@ -206,6 +208,7 @@ class ALL_POWERS:
                 datab = self.encode(share_msgs[node], share_pfs[node])
                 send(node, (APMsgType.SHARE, idx, datab))
 
+            # Processing old buffered messages
             temp_shares = self.verify_msgs(APMsgType.SHARE, idx)
             if len(temp_shares) > self.t:
                 eval_powers = self.gen_eval_shares(idx, temp_shares)
@@ -213,6 +216,9 @@ class ALL_POWERS:
                 for i in range(self.n):
                     send(i, (APMsgType.EVAL, idx, eval_msg))
             temp_evals = self.verify_msgs(APMsgType.EVAL, idx)
+            if len(temp_evals) == self.deg:
+                self.update_powers(idx, temp_evals)
+                continue
             
             while True:
                 sender, msg = await recv()
@@ -237,7 +243,7 @@ class ALL_POWERS:
                         s_powers = self.sr.deserialize_gs(bytes(s_msg))
                         if self.verify_eval(sender, s_idx, s_powers):
                             temp_evals[sender] = s_powers
-                        if len(temp_evals) >= self.deg:
+                        if len(temp_evals) == self.deg:
                             # Updating cur_powers with newly computed values
                             self.update_powers(idx, temp_evals)
                             break
