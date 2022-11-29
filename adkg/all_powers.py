@@ -1,7 +1,7 @@
 from adkg.polynomial import polynomials_over
 from adkg.utils.misc import wrap_send, subscribe_recv
 from adkg.utils.serilization import Serial
-from adkg.utils.poly_misc import prep_for_fft, interpolate_g1_batch_at
+from adkg.utils.poly_misc import prep_for_fft, interpolate_g1_batch_at, prep_for_fft_batch
 from adkg.extra_proofs import CP
 from pypairing import pair, robustblsfft
 import time
@@ -132,6 +132,42 @@ class ALL_POWERS:
         time_taken = time.time() - start
         self.benchmark_logger.info(f"Next message gen, ell:{ell}, time:{time_taken}")
 
+    def update_powers_naive(self, idx, all_evals):
+        start = time.time()
+        m = 2**idx
+        padding  = 0 + (m%(self.deg) != 0)
+        ell = m//(self.deg) + padding
+        outputs = [None]*m
+
+        xs = all_evals.keys()
+        ys = list(all_evals.values())
+        coords = prep_for_fft_batch(xs, ys, self.omega, ell, self.n, self.multiexp, self.ZR)
+        for i in range(ell):
+            if i == ell-1 and padding:
+                fft_inv = self.blsfft(coords[i], self.omegainv, self.n)
+                outputs[i*(self.deg):i*(self.deg)+m] = [x**self.ninv for x in fft_inv[:m%(self.deg)]]
+            else:
+                fft_inv = self.blsfft(coords[i], self.omegainv, self.n)
+                outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
+
+        # for i in range(ell):
+        #     coords = [None]*self.n
+        #     for node, evals in all_evals.items():
+        #         coords[node] = evals[i]
+        #     coords = prep_for_fft(coords, self.omega, self.n, self.multiexp, self.ZR)
+            
+        #     if i == ell-1 and padding:
+        #         fft_inv = self.blsfft(coords, self.omegainv, self.n)
+        #         outputs[i*(self.deg):i*(self.deg)+m] = [x**self.ninv for x in fft_inv[:m%(self.deg)]]
+        #     else:
+        #         fft_inv = self.blsfft(coords, self.omegainv, self.n)
+        #         outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
+        time_taken = time.time() - start
+        self.benchmark_logger.info(f"Next message gen, ell:{ell}, time:{time_taken}")
+        self.cur_powers[2**idx:2**(idx+1)] = outputs
+        return
+
+
     def verify_share(self, sender, s_idx, powers, pf):
         x = self.t_commits[s_idx][sender+1]
         y = self.multiexp(powers, self.rands2[s_idx])
@@ -217,7 +253,7 @@ class ALL_POWERS:
                     send(i, (APMsgType.EVAL, idx, eval_msg))
             temp_evals = self.verify_msgs(APMsgType.EVAL, idx)
             if len(temp_evals) == self.deg:
-                self.update_powers(idx, temp_evals)
+                self.update_powers_naive(idx, temp_evals)
                 continue
             
             while True:
@@ -245,7 +281,7 @@ class ALL_POWERS:
                             temp_evals[sender] = s_powers
                         if len(temp_evals) == self.deg:
                             # Updating cur_powers with newly computed values
-                            self.update_powers(idx, temp_evals)
+                            self.update_powers_naive(idx, temp_evals)
                             break
 
         return self.cur_powers

@@ -20,6 +20,35 @@ def get_omega(field, n, seed=None):
     assert y**(n // 2) != 1, "omega must be primitive 2n'th root of unity"
     return y
 
+
+def test_fft2():
+    t = 1
+    logq = 5
+    n = 3*t + 1
+    omega2 = get_omega(ZR, 2*n)
+    omega = omega2**2
+    g = G1.rand(b'')
+
+    p = polynomials_over(ZR)
+    q = 2**logq
+    m = q//(t+1)
+    m = 2
+    omega = omega2**2
+
+    zs = list(range(n))
+    shuffle(zs)
+    zs = zs[:t+1]
+    polys = [p.random(t) for _ in range(m)]
+    all_ys = [polys[i].evaluate_fft(omega, n) for i in range(m)]
+    ys = []
+    for i in range(m):
+        for j in zs:
+            ys.append(g**all_ys[i][j])
+
+    fft_rep = robustblsfft(zs, ys, omega2, n)
+    ccs = [[g**val for val in polys[i]] for i in range(m)]
+    assert fft_rep == ccs
+
 def test_fft():
     for i in range(5): 
         n = 2**(i+2)

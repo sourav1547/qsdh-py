@@ -39,8 +39,8 @@ async def test_adkg(test_router):
     t = 1
     logq = 5
     n = 3*t+1
-    # t, n = 2, 8
-    omega = get_omega(ZR, n, 1729)
+    t, n = 2, 8
+    omega2 = get_omega(ZR, 2*n, 1729)
     g, h, g2, pks, sks = get_avss_params(n, G1, G2)
     sends, recvs, _ = test_router(n, maxdelay=0.01)
     pc = PolyCommitHybrid(g, h, ZR, multiexp)
@@ -53,7 +53,7 @@ async def test_adkg(test_router):
     curve_params = (ZR, G1, multiexp, dotprod, blsfft)
 
     for i in range(n):
-        dkg = ADKG(pks, sks[i], g, h, g2, n, t, logq, i, omega, sends[i], recvs[i], pc, curve_params, (mat1, mat2))
+        dkg = ADKG(pks, sks[i], g, h, g2, n, t, logq, i, omega2, sends[i], recvs[i], pc, curve_params, (mat1, mat2))
         dkg_list[i] = dkg
         dkg_tasks[i] = asyncio.create_task(dkg.run_adkg(start_time))
     

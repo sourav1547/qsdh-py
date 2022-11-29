@@ -39,7 +39,7 @@ async def _run(peers, n, t, k, my_id, start_time):
     g, h, g2, pks, sks = get_avss_params(n, G1, G2)
     pc = PolyCommitHybrid(g, h, ZR, multiexp)
     logq = k
-    omega = get_omega(ZR, n, 1729)
+    omega2 = get_omega(ZR, 2*n, 1729)
     mat1, mat2 = gen_vector(t, n)
     curve_params = (ZR, G1, multiexp, dotprod, blsfft)
 
@@ -50,7 +50,7 @@ async def _run(peers, n, t, k, my_id, start_time):
         benchmark_logger = logging.LoggerAdapter(
            logging.getLogger("benchmark_logger"), {"node_id": my_id}
         )
-        with ADKG(pks, sks[my_id], g, h, g2, n, t, logq, my_id, omega, send, recv, pc, curve_params, (mat1, mat2)) as adkg:
+        with ADKG(pks, sks[my_id], g, h, g2, n, t, logq, my_id, omega2, send, recv, pc, curve_params, (mat1, mat2)) as adkg:
             while True:
                 if time.time() > start_time:
                     break

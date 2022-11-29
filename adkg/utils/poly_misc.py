@@ -65,7 +65,6 @@ def interpolate_g1_at(shares, x_recomb, multiexp, ZR):
     return multiexp(list(ys), vector)
 
 def interpolate_g1_batch_at(xs, shares, x_recomb, multiexp, ZR):
-    # shares are in the form (x, y=f(x))
     if type(x_recomb) is int:
         x_recomb = ZR(x_recomb)
     vector = []
@@ -105,6 +104,38 @@ def prep_for_fft(coords, omega, n, multiexp, ZR):
         if coords[idx] == None:
             coords[idx] = interpolate_g1_at(lag_coords, omega**idx, multiexp, ZR)
     return coords
+
+# To optimize this using NTT
+def prep_for_fft_batch(xs, ys, omega, ell, n, multiexp, ZR):
+    deg = len(xs)
+    outputs = [[None]*n for _ in range(ell)]
+    missing_cords = []
+    for i in range(0, n):
+        if i not in xs:
+            missing_cords.append(i)
+    
+    zs = [omega**(i+1) for i in xs]
+    
+    lags = {}
+    for node in missing_cords:
+        x_recomb = omega**(node+1)
+        vector = []
+        for i, x_i in enumerate(zs):
+            factors = [
+                (x_recomb - x_k) / (x_i - x_k) for k, x_k in enumerate(zs) if k != i
+            ]
+            vector.append(reduce(operator.mul, factors))
+        lags[node] = vector
+    
+    for i in range(ell):
+        for k, x_k in enumerate(xs):
+            outputs[i][x_k] = ys[k][i]
+
+        ys_i = [ys[k][i] for k in range(deg)]
+        for node in missing_cords:
+            outputs[i][node] = multiexp(ys_i, lags[node])
+    
+    return outputs
 
 # To optimize this using NTT
 def evaluate_g1_at_all(coeffs, n, ZR, multiexp):
