@@ -150,18 +150,6 @@ class ALL_POWERS:
                 fft_inv = self.blsfft(coords[i], self.omegainv, self.n)
                 outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
 
-        # for i in range(ell):
-        #     coords = [None]*self.n
-        #     for node, evals in all_evals.items():
-        #         coords[node] = evals[i]
-        #     coords = prep_for_fft(coords, self.omega, self.n, self.multiexp, self.ZR)
-            
-        #     if i == ell-1 and padding:
-        #         fft_inv = self.blsfft(coords, self.omegainv, self.n)
-        #         outputs[i*(self.deg):i*(self.deg)+m] = [x**self.ninv for x in fft_inv[:m%(self.deg)]]
-        #     else:
-        #         fft_inv = self.blsfft(coords, self.omegainv, self.n)
-        #         outputs[i*(self.deg):(i+1)*(self.deg)] = [x**self.ninv for x in fft_inv[:self.deg]]
         time_taken = time.time() - start
         self.benchmark_logger.info(f"Next message gen, ell:{ell}, time:{time_taken}")
         self.cur_powers[2**idx:2**(idx+1)] = outputs
@@ -253,7 +241,7 @@ class ALL_POWERS:
                     send(i, (APMsgType.EVAL, idx, eval_msg))
             temp_evals = self.verify_msgs(APMsgType.EVAL, idx)
             if len(temp_evals) == self.deg:
-                self.update_powers_naive(idx, temp_evals)
+                self.update_powers(idx, temp_evals)
                 continue
             
             while True:
@@ -281,7 +269,7 @@ class ALL_POWERS:
                             temp_evals[sender] = s_powers
                         if len(temp_evals) == self.deg:
                             # Updating cur_powers with newly computed values
-                            self.update_powers_naive(idx, temp_evals)
+                            self.update_powers(idx, temp_evals)
                             break
 
         return self.cur_powers

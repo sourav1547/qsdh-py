@@ -5,32 +5,63 @@ from adkg.extra_proofs import PoK
 import uvloop
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 from pypairing import ZR, G1, G2, blsmultiexp as multiexp, pair
-def get_avss_params(n, G1, G2):
-    g, h = G1.rand(b'g'), G1.rand(b'h')
-    g2 = G2.rand(b'g')
-    public_keys, private_keys = [None] * n, [None] * n
-    for i in range(n):
-        private_keys[i] = ZR.hash(str(i).encode())
-        public_keys[i] = g**private_keys[i]
-    return g, h, g2, public_keys, private_keys
 
-@mark.parametrize("t, logq", [(5, 5), (5,10), (5,15)])
-def test_benchmark_qsdh_base(test_router, benchmark, t, logq):
+def verify_prev(start, cnode, output_g1, output_g2, q, g1, g2, proofs):
+    cur_g = output_g1[start-1][0]
+    for pnode in range(start, cnode):
+        pok = PoK(cur_g, ZR, multiexp)
+        assert pok.verify(output_g1[pnode][0], proofs[pnode])
+        cur_g = output_g1[pnode][0]
+        sig1 = ZR.rand()
+        sig2 = ZR.rand()
+        sig1_vec = [sig1**i for i in range(q)]
+        l1 = multiexp(output_g1[pnode], sig1_vec)
+        r1 = g2*(output_g2[pnode][0]**sig2)
+        l2 = g1*multiexp(output_g1[pnode][:q-1], sig1_vec[1:])
+        r2 = output_g2[pnode][1]*(output_g2[pnode][1]**sig2)
+        assert pair(l1,r1) == pair(l2,r2)
+
+
+@mark.parametrize("n, logq", [(16, 5), (16, 10)])
+def test_benchmark_qsdh_base_no_verf(test_router, benchmark, n, logq):
     loop = asyncio.get_event_loop()
-    n = 3*t + 1
-    g, _, g2, _, _ = get_avss_params(n, G1, G2)
-    params = (g, g2, n, logq)
+    g1, g2 = G1.rand(b'g'), G2.rand(b'g')
+    params = (n, logq, g1, g2)
 
     def _prog():
-        loop.run_until_complete(run_qsdh_base(params))
+        loop.run_until_complete(run_qsdh_base_no_verf(params))
 
     benchmark(_prog)
 
-async def run_qsdh_base(params):
-    g, g2, n, logq, = params
+
+@mark.parametrize("n, logq", [(16, 5), (16, 10)])
+def test_benchmark_qsdh_base_serial_verf(test_router, benchmark, n, logq):
+    loop = asyncio.get_event_loop()
+    g1, g2 = G1.rand(b'g'), G2.rand(b'g')
+    params = (n, logq, g1, g2)
+
+    def _prog():
+        loop.run_until_complete(run_qsdh_base_serial_verf(params))
+
+    benchmark(_prog)
+
+@mark.parametrize("n, logq", [(16, 5), (16, 10)])
+def test_benchmark_qsdh_base_pipe_verf(test_router, benchmark, n, logq):
+    loop = asyncio.get_event_loop()
+    g1, g2 = G1.rand(b'g'), G2.rand(b'g')
+    params = (n, logq, g1, g2)
+
+    def _prog():
+        loop.run_until_complete(run_qsdh_base_pipe_verf(params))
+
+    benchmark(_prog)
+
+
+async def run_qsdh_base_no_verf(params):
+    n, logq, g1, _ = params
     q = 2**logq
-    output_g1 = {0:[g]*q}
-    # output_g2 = {0:[g2]*q}
+    output_g1 = {0:[g1]*q}
+
     for i in range(1, n+1):
         alpha = ZR.rand()
         cur_alpha = alpha
@@ -38,62 +69,59 @@ async def run_qsdh_base(params):
         for ii in range(q):
             output_g1[i][ii] = output_g1[i-1][ii]**(cur_alpha)
             cur_alpha = cur_alpha*alpha
-            # output_g2[i][ii] = output_g2[i-1][ii]**(alpha**ii)
 
 
-async def run_qsdh_base_serial(params):
-    g, g2, n, logq, = params
+async def run_qsdh_base_serial_verf(params):
+    n, logq, g1, g2 = params
     q = 2**logq
-    output_g1 = {0:[g]*q}
-    output_g2 = {0:[g2]*2}
-    proofs = [None]*(n-1)
-    
-    def verify_prev(idx):
-        cur_g = g
-        for node in range(1,idx):
-            pok = PoK(cur_g, ZR, multiexp)
-            if not pok.verify(output_g1[node], proofs[node]):
-                exit()
-            cur_g = output_g1[node]
-            sig1 = ZR.rand()
-            sig2 = ZR.rand()
-            sig1_vec = [sig1**i for i in range(q)]
-            l1 = multiexp(output_g1[node], sig1_vec)
-            r1 = g2*(output_g2[0]**sig2)
-            l2 = g*multiexp(output_g1[node][1:], sig1_vec[1:])
-            r2 = g2*(output_g2[1]**sig2)
-            if not pair(l1,r1) == pair(l2,r2):
-                exit()
 
-       
-    for i in range(1, n+1):
-        # Verify previoius updates
-        verify_prev(i)
+    output_g1 = {0:[g1]*q}
+    output_g2 = {0:[g2]*2}
+    proofs = [None]*(n+1)
+    for node in range(1, n+1):
+        # Verify all previoius updates
+        verify_prev(1, node, output_g1, output_g2, q, g1, g2, proofs)
+        
         # Update the parameters
         alpha = ZR.rand()
         cur_alpha = alpha
-        output_g1[i] = [None]*q
-        output_g2[i] = [output_g2[i-1]**alpha**j for j in range(2)]
+        output_g1[node] = [None]*q
+        output_g2[node] = [output_g2[node-1][j]**(alpha**j) for j in range(2)]
         for ii in range(q):
-            output_g1[i][ii] = output_g1[i-1][ii]**(cur_alpha)
+            output_g1[node][ii] = output_g1[node-1][ii]**(cur_alpha)
             cur_alpha = cur_alpha*alpha
 
         # Generate proof of knowledge of alpha
-        g = output_g1[i-1][1]
+        g = output_g1[node-1][0]
         h = g**alpha
         pok = PoK(g, ZR, multiexp)
-        pf = pok.prove(alpha, h)
-        proofs[i] = pf
+        proofs[node] = pok.prove(alpha, h)
         
-async def run_qsdh_base_pipe(params):
-    g, g2, n, logq, = params
+async def run_qsdh_base_pipe_verf(params):
+    n, logq, g1, g2 = params
     q = 2**logq
-    output_g1 = {0:[g]*q}
+
+    output_g1 = {0:[g1]*q}
     output_g2 = {0:[g2]*2}
-    proofs = [None]*(n-1)
-    
-    def verify(idx):
-        cur_g = g
-        for node in range(1,idx):
-            sig_node = ZR.rand()
-            sigma_vec = []
+    proofs = [None]*(n+1)
+    for node in range(1, n+1):
+        # Verify previoius updates
+        start = node-1
+        if node == 1:
+            start = 1
+        verify_prev(start, node, output_g1, output_g2, q, g1, g2, proofs)
+        
+        # Update the parameters
+        alpha = ZR.rand()
+        cur_alpha = alpha
+        output_g1[node] = [None]*q
+        output_g2[node] = [output_g2[node-1][j]**(alpha**j) for j in range(2)]
+        for ii in range(q):
+            output_g1[node][ii] = output_g1[node-1][ii]**(cur_alpha)
+            cur_alpha = cur_alpha*alpha
+
+        # Generate proof of knowledge of alpha
+        g = output_g1[node-1][0]
+        h = g**alpha
+        pok = PoK(g, ZR, multiexp)
+        proofs[node] = pok.prove(alpha, h)

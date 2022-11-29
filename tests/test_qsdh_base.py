@@ -23,22 +23,20 @@ def test_qsdh_base_no_verf():
             cur_alpha = cur_alpha*alpha
             # output_g2[i][ii] = output_g2[i-1][ii]**(alpha**ii)
 
-def verify_prev(idx, output_g1, output_g2, q, g1, g2, proofs):
-    cur_g = g1
-    for node in range(1,idx):
+def verify_prev(start, cnode, output_g1, output_g2, q, g1, g2, proofs):
+    cur_g = output_g1[start-1][0]
+    for pnode in range(start, cnode):
         pok = PoK(cur_g, ZR, multiexp)
-        if not pok.verify(output_g1[node][0], proofs[node]):
-            exit()
-        cur_g = output_g1[node]
+        assert pok.verify(output_g1[pnode][0], proofs[pnode])
+        cur_g = output_g1[pnode][0]
         sig1 = ZR.rand()
         sig2 = ZR.rand()
         sig1_vec = [sig1**i for i in range(q)]
-        l1 = multiexp(output_g1[node], sig1_vec)
-        r1 = g2*(output_g2[node][0]**sig2)
-        l2 = g1*multiexp(output_g1[node][1:], sig1_vec[1:])
-        r2 = g2*(output_g2[node][1]**sig2)
-        if not pair(l1,r1) == pair(l2,r2):
-            print("Pairing test failed")
+        l1 = multiexp(output_g1[pnode], sig1_vec)
+        r1 = g2*(output_g2[pnode][0]**sig2)
+        l2 = g1*multiexp(output_g1[pnode][:q-1], sig1_vec[1:])
+        r2 = output_g2[pnode][1]*(output_g2[pnode][1]**sig2)
+        assert pair(l1,r1) == pair(l2,r2)
 
 
 def test_qsdh_base_serial():
@@ -50,34 +48,52 @@ def test_qsdh_base_serial():
 
     output_g1 = {0:[g1]*q}
     output_g2 = {0:[g2]*2}
-    proofs = [None]*(n-1)
-    for i in range(1, n+1):
+    proofs = [None]*(n+1)
+    for node in range(1, n+1):
         # Verify previoius updates
-        verify_prev(i, output_g1, output_g2, q, g1, g2, proofs)
+        verify_prev(1, node, output_g1, output_g2, q, g1, g2, proofs)
         # Update the parameters
         alpha = ZR.rand()
         cur_alpha = alpha
-        output_g1[i] = [None]*q
-        output_g2[i] = [output_g2[i-1][j]**(alpha**j) for j in range(2)]
+        output_g1[node] = [None]*q
+        output_g2[node] = [output_g2[node-1][j]**(alpha**j) for j in range(2)]
         for ii in range(q):
-            output_g1[i][ii] = output_g1[i-1][ii]**(cur_alpha)
+            output_g1[node][ii] = output_g1[node-1][ii]**(cur_alpha)
             cur_alpha = cur_alpha*alpha
 
         # Generate proof of knowledge of alpha
-        g = output_g1[i-1][0]
+        g = output_g1[node-1][0]
         h = g**alpha
         pok = PoK(g, ZR, multiexp)
-        pf = pok.prove(alpha, h)
-        proofs[i] = pf
+        proofs[node] = pok.prove(alpha, h)
         
-def test_qsdh_base_pipe():
+def test_qsdh_base_pipe_verf():
     t = 1
     n = 3*t + 1
     logq = 5 
-    g, g2 = G1.rand(b'g'), G2.rand(b'g')
+    g1, g2 = G1.rand(b'g'), G2.rand(b'g')
     q = 2**logq
 
-
-    output_g1 = {0:[g]*q}
+    output_g1 = {0:[g1]*q}
     output_g2 = {0:[g2]*2}
-    proofs = [None]*(n-1)
+    proofs = [None]*(n+1)
+    for node in range(1, n+1):
+        # Verify previoius updates
+        start = node-1
+        if node == 1:
+            start = 1
+        verify_prev(start, node, output_g1, output_g2, q, g1, g2, proofs)
+        # Update the parameters
+        alpha = ZR.rand()
+        cur_alpha = alpha
+        output_g1[node] = [None]*q
+        output_g2[node] = [output_g2[node-1][j]**(alpha**j) for j in range(2)]
+        for ii in range(q):
+            output_g1[node][ii] = output_g1[node-1][ii]**(cur_alpha)
+            cur_alpha = cur_alpha*alpha
+
+        # Generate proof of knowledge of alpha
+        g = output_g1[node-1][0]
+        h = g**alpha
+        pok = PoK(g, ZR, multiexp)
+        proofs[node] = pok.prove(alpha, h)
