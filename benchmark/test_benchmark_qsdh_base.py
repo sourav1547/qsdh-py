@@ -22,7 +22,8 @@ def verify_prev(start, cnode, output_g1, output_g2, q, g1, g2, proofs):
         assert pair(l1,r1) == pair(l2,r2)
 
 
-@mark.parametrize("n, logq", [(16, 5), (16, 10)])
+# @mark.parametrize("n, logq", [(16, 5), (16, 10)])
+@mark.parametrize("n, logq", [(16, 14), (16, 16), (16, 18), (32, 14), (32, 16), (32, 18), (64, 14), (64, 16), (64, 18), (128, 14), (128, 16), (128, 18)])
 def test_benchmark_qsdh_base_no_verf(test_router, benchmark, n, logq):
     loop = asyncio.get_event_loop()
     g1, g2 = G1.rand(b'g'), G2.rand(b'g')
@@ -34,7 +35,7 @@ def test_benchmark_qsdh_base_no_verf(test_router, benchmark, n, logq):
     benchmark(_prog)
 
 
-@mark.parametrize("n, logq", [(16, 5), (16, 10)])
+@mark.parametrize("n, logq", [(16, 14), (16, 16), (16, 18), (32, 14), (32, 16), (32, 18), (64, 14), (64, 16), (64, 18), (128, 14), (128, 16), (128, 18)])
 def test_benchmark_qsdh_base_serial_verf(test_router, benchmark, n, logq):
     loop = asyncio.get_event_loop()
     g1, g2 = G1.rand(b'g'), G2.rand(b'g')
@@ -45,7 +46,8 @@ def test_benchmark_qsdh_base_serial_verf(test_router, benchmark, n, logq):
 
     benchmark(_prog)
 
-@mark.parametrize("n, logq", [(16, 5), (16, 10)])
+# @mark.parametrize("n, logq", [(16, 5), (16, 10)])
+@mark.parametrize("n, logq", [(16, 14), (16, 16), (16, 18), (32, 14), (32, 16), (32, 18), (64, 14), (64, 16), (64, 18), (128, 14), (128, 16), (128, 18)])
 def test_benchmark_qsdh_base_pipe_verf(test_router, benchmark, n, logq):
     loop = asyncio.get_event_loop()
     g1, g2 = G1.rand(b'g'), G2.rand(b'g')
