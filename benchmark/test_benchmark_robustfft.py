@@ -23,7 +23,11 @@ def get_omega(field, n, seed=None):
     return y
 
 
-@mark.parametrize("n, t, logq", [(16, 10, 10), (32, 21, 10)])
+@mark.parametrize("n, t, logq", [(16, 10, 5)])
+@mark.benchmark(
+    min_rounds=1,
+    max_time=0.0005,
+)
 # @mark.parametrize("n, t, logq", [(64, 42, 10)])
 def test_benchmark_qsdh_base(test_router, benchmark, n, t, logq):
     loop = asyncio.get_event_loop()
